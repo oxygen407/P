@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>P2P 다인 채팅 + 캔버스 + 오목</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#070707; --panel:#0f0f0f; --crt:#19ff19; --muted:#66ff66; --ink:#cfeccf;
+}
+*{box-sizing:border-box}
+html,body{height:100%; margin:0; background:var(--bg); color:var(--ink); font-family:'Share Tech Mono',monospace}
+.container{max-width:1100px; margin:10px auto; height:calc(100vh - 20px); display:flex; flex-direction:column; border:3px solid var(--crt); padding:8px; gap:8px}
+.header{padding:6px 8px; background:#030; color:var(--crt); text-align:center; user-select:none}
+.topbar{display:flex; gap:8px; align-items:center; padding:8px; background:var(--panel)}
+.topbar input, .topbar button { background:#0b0b0b; color:var(--crt); border:1px solid rgba(25,255,25,0.2); padding:6px; font-family:inherit }
+.topbar button{cursor:pointer}
+.main{display:flex; gap:8px; flex:1; min-height:0}
+.left, .right{background:var(--panel); border:2px solid rgba(25,255,25,0.12); padding:8px; display:flex; flex-direction:column}
+.left{flex:1; min-width:260px; min-height:0}
+.right{flex:1.2; min-height:0; align-items:center}
+#chatLog{flex:1; overflow:auto; padding:8px; background:#020202; border:1px solid rgba(25,255,25,0.06)}
+.msg{margin:6px 0}
+.ts{color:#0f7; font-size:.78em; margin-right:6px}
+.name{color:var(--muted); margin-right:6px; font-weight:700}
+.chatForm{display:flex; gap:8px; margin-top:8px}
+.chatForm input{flex:1; padding:8px; background:#0c0c0c; color:var(--crt); border:1px solid rgba(25,255,25,0.06)}
+.chatForm button{padding:8px 12px; cursor:pointer}
+.hint{font-size:0.85em; color:#8f8; margin-top:6px}
+.members{margin-top:8px; font-size:.92em; color:#9f9}
+.roomLink{font-size:0.85em; color:#9f9; word-break:break-all}
+.canvasWrap{width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; padding:8px}
+#pixelCanvas{width:min(480px,95%); height:auto; image-rendering:pixelated; border:3px solid rgba(25,255,25,0.08); background:#020}
+.palette{display:flex; gap:6px; flex-wrap:wrap; justify-content:center}
+.sw{width:24px; height:24px; border:1px solid #111; cursor:pointer}
+.sw.sel{outline:2px solid #fff}
+#omokCanvas{width:min(560px,95%); height:auto; border:3px solid rgba(25,255,25,0.08); background:#040}
+.controlsRow{display:flex; gap:8px; margin-top:8px; flex-wrap:wrap}
+.small{padding:6px 8px; background:#0b0b0b; color:var(--crt); border:1px solid rgba(25,255,25,0.06); cursor:pointer}
+.footer{font-size:0.85em; color:#8f8; padding:6px 8px; text-align:center}
+@media(max-width:800px){
+  .main{flex-direction:column}
+  .right{order:2}
+  .left{order:1}
+}
+</style>
+</head>
+<body>
+<div class="container" role="main">
+  <div class="header">P2P 채팅</div>
+
+  <div class="topbar" id="topbar">
+    <input id="userName" placeholder="닉네임 (2~12자)" maxlength="12" />
+    <input id="roomId" placeholder="방 코드(6자리) — 비워두면 자동 생성" maxlength="6" />
+    <button id="btnStart">접속/호스트 생성</button>
+    <span class="roomLink" id="roomInfo"></span>
+  </div>
+
+  <div class="main">
+    <div class="left" aria-label="채팅영역">
+      <div id="chatLog" aria-live="polite"></div>
+      <form id="chatForm" class="chatForm" autocomplete="off">
+        <input id="chatInput" placeholder="메시지 입력 — /help 로 명령어 보기" />
+        <button type="submit" class="small">전송</button>
+      </form>
+      <div class="controlsRow">
+        <button id="btnHelp" class="small">/help</button>
+        <button id="btnOmok" class="small">/omok start</button>
+        <button id="btnClear" class="small">채팅 지우기</button>
+      </div>
+      <div class="members" id="members">참가자: 0</div>
+      <div class="hint">최대 권장 4~6명 (브라우저 P2P 메쉬의 한계)</div>
+    </div>
+
+    <div class="right" aria-label="게임영역">
+      <div class="canvasWrap" id="canvasWrap">
+        <canvas id="pixelCanvas" width="320" height="320" aria-label="16x16 픽셀 캔버스"></canvas>
+        <div class="palette" id="palette"></div>
+
+        <canvas id="omokCanvas" width="560" height="560" style="display:none;margin-top:8px" aria-label="오목판"></canvas>
+        <div id="omokStatus" class="hint" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">P2P — 모든 데이터는 참가자 브라우저 간 직접 전송(시그널링: PeerJS Cloud). 첫 접속자가 호스트 역할을 합니다.</div>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+/* ========= 유틸 / 상태 ========= */
+const $ = sel => document.querySelector(sel);
+const chatLog = $('#chatLog');
+const chatForm = $('#chatForm');
+const chatInput = $('#chatInput');
+const btnHelp = $('#btnHelp');
+const btnOmok = $('#btnOmok');
+const btnClear = $('#btnClear');
+const membersEl = $('#members');
+const roomInfoEl = $('#roomInfo');
+const userNameInput = $('#userName');
+const roomIdInput = $('#roomId');
+const btnStart = $('#btnStart');
+
+let isHost = false;
+let myId = '';
+let roomId = '';
+let nickname = '';
+let peer = null;
+let conns = []; // host: list of guests; guest: only hostConn stored here at [0]
+let hostConn = null;
+const commands = {
+  '/help': '명령어 목록을 보여줍니다.',
+  '/omok start': '오목 게임을 시작합니다.',
+  '/clear': '채팅 화면을 지웁니다.'
+};
+
+/* ======= 메시지 로그 ======= */
+function now(){ return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+function addMsg(name, text, local=false){
+  const d = document.createElement('div'); d.className='msg';
+  d.innerHTML = `<span class="ts">[${now()}]</span><span class="name">${escapeHtml(name)}</span>${escapeHtml(text)}`;
+  if(local) d.style.color='#8f8';
+  chatLog.appendChild(d); chatLog.scrollTop = chatLog.scrollHeight;
+}
+function escapeHtml(s=''){ return String(s).replace(/[&<>"]/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ======= PeerJS 간단 호스트/게스트 모델 ======= */
+/*
+ - 첫 사용자가 '호스트'가 됨: peer id = 'room-'+roomId
+ - 이후 사용자는 랜덤 peer id로 생성, room-'roomId'에 connect 하여 host와 연결
+ - 호스트는 모든 게스트 연결을 저장(conns)하고, 들어오는 메시지를 다른 게스트들에게 broadcast
+ - 게스트는 hostConn을 통해 host로 메시지 전송
+ - 모든 메시지는 객체 {type:'chat'|'cmd'|'pixel'|'omok'|'meta', ...}
+*/
+
+function startPeer(asHost){
+  const id = asHost ? 'room-'+roomId : 'peer-'+Math.random().toString(36).slice(2,8);
+  peer = new Peer(id, { host:'0.peerjs.com', port:443, secure:true, debug:1 });
+  peer.on('open', id => {
+    myId = id;
+    addMsg('시스템', `내 ID: ${id}`, true);
+    updateRoomInfo();
+    if(!asHost) { connectToHost(); }
+  });
+  peer.on('connection', c => {
+    // only hosts expect incoming conns
+    if(!isHost){
+      // non-hosts should not accept incoming connections - close politely
+      c.on('open', ()=>{ c.send({type:'system', text:'이 피어는 호스트만 연결 받습니다.'}); setTimeout(()=>c.close(),200); });
+      return;
+    }
+    // host: accept guest
+    c.on('open', ()=> {
+      // initial handshake: guest should send {type:'meta', name}
+      c.once('data', data => {
+        if(data?.type==='meta' && data.name){
+          conns.push({id:c.peer, conn:c, name:data.name});
+          addMsg('시스템', `참가자 입장: ${data.name} (${c.peer})`, true);
+          updateMembers();
+          // send full state sync (pixel, omok)
+          sendStateTo(c);
+          // set up data handler
+          c.on('data', msg => hostOnData(c, msg));
+          c.on('close', ()=> hostOnClose(c));
+        } else {
+          c.send({type:'system', text:'잘못된 핸드셰이크'}); setTimeout(()=>c.close(),100);
+        }
+      });
+    });
+  });
+
+  peer.on('error', err => addMsg('시스템','Peer 오류: '+err, true));
+}
+
+function updateRoomInfo(){
+  if(isHost){
+    roomInfoEl.textContent = `방 코드: ${roomId} — 링크: ${location.origin + location.pathname + '?r=' + roomId}`;
+  } else {
+    roomInfoEl.textContent = `참여중: ${roomId}`;
+  }
+}
+
+/* Host: Broadcast to all guests */
+function hostBroadcast(obj, exceptPeerId=null){
+  conns.forEach(c=>{
+    if(c.conn.open && c.id !== exceptPeerId){
+      try{ c.conn.send(obj); } catch(e){}
+    }
+  });
+}
+
+/* Host receive from a guest */
+function hostOnData(connObj, msg){
+  // msg from guest -> broadcast to other guests and reflect in host UI
+  if(msg?.type === 'chat'){
+    addMsg(msg.name, msg.text);
+    hostBroadcast(msg, connObj.peer);
+  } else if(msg?.type === 'cmd'){
+    // cmd (like /omok start) -> host acts and broadcast as cmd
+    handleCmdLocal(msg.text, msg.name);
+    hostBroadcast(msg, connObj.peer);
+  } else if(msg?.type === 'pixel'){
+    // change pixel -> apply and broadcast
+    applyPixel(msg.x, msg.y, msg.color, true);
+    hostBroadcast(msg, connObj.peer);
+  } else if(msg?.type==='omok'){
+    // delegate to omok handler
+    handleOmokMessage(msg, connObj.peer);
+    hostBroadcast(msg, connObj.peer);
+  }
+}
+
+/* Host close */
+function hostOnClose(connObj){
+  const idx = conns.findIndex(c=>c.id===connObj.peer);
+  if(idx>=0){
+    const name = conns[idx].name;
+    conns.splice(idx,1);
+    addMsg('시스템', `퇴장: ${name}`, true);
+    updateMembers();
+    // update omok participants if needed
+    omokOnLeave(connObj.peer);
+  }
+}
+
+/* Guest: connect to host */
+function connectToHost(){
+  const c = peer.connect('room-'+roomId);
+  c.on('open', ()=>{
+    hostConn = c;
+    // send meta
+    hostConn.send({type:'meta', name:nickname});
+    addMsg('시스템','호스트에 연결됨',true);
+    updateMembers();
+    c.on('data', guestOnData);
+    c.on('close', ()=> { addMsg('시스템','호스트 연결 종료', true); hostConn=null; });
+    c.on('error', e=> addMsg('시스템','연결오류: '+e, true));
+  });
+}
+
+/* Guest receive from host */
+function guestOnData(msg){
+  if(msg?.type === 'chat') addMsg(msg.name, msg.text);
+  else if(msg?.type === 'cmd') handleCmdLocal(msg.text, msg.name);
+  else if(msg?.type === 'pixel') applyPixel(msg.x, msg.y, msg.color, true);
+  else if(msg?.type === 'omok') handleOmokMessage(msg);
+  else if(msg?.type === 'meta'){
+    // optional meta updates e.g., participant list
+    updateMembersFromMeta(msg.list);
+  } else if(msg?.type === 'sync'){
+    // initial sync: pixel, omok
+    if(msg.pixel) pixelImport(msg.pixel);
+    if(msg.omok) omokImport(msg.omok);
+  } else if(msg?.type === 'system') addMsg('시스템', msg.text, true);
+}
+
+/* Update members UI (host gathers names from conns + host) */
+function updateMembers(){
+  if(isHost){
+    const list = [nickname, ...conns.map(c=>c.name)];
+    membersEl.textContent = '참가자: ' + list.join(', ');
+  } else {
+    // guest: ask host for simple members list? for simplicity show self+unknown
+    membersEl.textContent = '참가자: (호스트 포함) - 대기중';
+  }
+}
+function updateMembersFromMeta(list){ // guest receives
+  if(Array.isArray(list)) membersEl.textContent = '참가자: ' + list.join(', ');
+}
+
+/* Send state from host to a specific guest on join */
+function sendStateTo(conn){
+  const pkt = { type:'sync', pixel:exportPixel(), omok:omokExport() , meta:{list:[nickname, ...conns.map(c=>c.name)]} };
+  try{ conn.send(pkt); }catch(e){}
+}
+
+/* ========== Chat form ========== */
+chatForm.addEventListener('submit', e=>{
+  e.preventDefault();
+  const text = chatInput.value.trim();
+  if(!text) return;
+  if(text.startsWith('/')){
+    // command
+    const pkt = {type:'cmd', text, name:nickname};
+    handleCmdLocal(text, nickname);
+    if(isHost) hostBroadcast(pkt);
+    else if(hostConn && hostConn.open) hostConn.send(pkt);
+  } else {
+    addMsg(nickname, text, true);
+    const pkt = {type:'chat', name:nickname, text};
+    if(isHost) hostBroadcast(pkt);
+    else if(hostConn && hostConn.open) hostConn.send(pkt);
+  }
+  chatInput.value='';
+});
+
+/* ======= Control buttons ======= */
+btnHelp.addEventListener('click', ()=> {
+  showHelp();
+});
+btnOmok.addEventListener('click', ()=> {
+  sendCmd('/omok start');
+});
+btnClear.addEventListener('click', ()=> { chatLog.innerHTML=''; });
+
+function showHelp(){
+  addMsg('시스템','=== 명령어 ===', true);
+  for(const k in commands) addMsg('시스템', `${k} — ${commands[k]}`, true);
+}
+function sendCmd(cmd){
+  const pkt = {type:'cmd', text:cmd, name:nickname};
+  handleCmdLocal(cmd, nickname);
+  if(isHost) hostBroadcast(pkt);
+  else if(hostConn && hostConn.open) hostConn.send(pkt);
+}
+
+/* ======= Start / connect UI ======= */
+btnStart.addEventListener('click', ()=>{
+  nickname = (userNameInput.value||'').trim();
+  let rv = (roomIdInput.value||'').trim();
+  if(!nickname || nickname.length<2){ alert('닉네임 2자 이상 입력하세요.'); return; }
+  if(!rv) rv = Math.random().toString(36).slice(2,8).toUpperCase().slice(0,6);
+  roomId = rv.slice(0,6);
+  // decide host or join
+  // Try connect as guest: create temporary peer and try connect to 'room-'+roomId; if fails within 1s -> create host
+  isHost = false;
+  nickname = nickname;
+  // create peer to test
+  const tempPeer = new Peer('probe-'+Math.random().toString(36).slice(2,8), {host:'0.peerjs.com', port:443, secure:true});
+  let probed=false;
+  tempPeer.on('open', id => {
+    // try connect to room-
+    const probeConn = tempPeer.connect('room-'+roomId, {serialization:'json'});
+    let timer = setTimeout(()=> {
+      if(!probed){
+        // assume no host -> become host
+        probed=true;
+        tempPeer.destroy();
+        isHost=true;
+        startPeer(true);
+        updateRoomInfo();
+        updateMembers();
+        addMsg('시스템', `호스트로 방 생성: ${roomId}`, true);
+        // show link in URL
+        history.replaceState(null, '', '?r='+roomId);
+      }
+    }, 900);
+    probeConn.on('open', ()=>{
+      if(!probed){
+        probed=true;
+        clearTimeout(timer);
+        // there is a host -> join as guest
+        tempPeer.destroy();
+        isHost=false;
+        startPeer(false);
+        // After peer open, connect to host
+        setTimeout(()=> { connectToHost(); }, 400);
+        addMsg('시스템', `호스트 발견. 방 참여: ${roomId}`, true);
+        history.replaceState(null, '', '?r='+roomId);
+      }
+    });
+    probeConn.on('error', ()=>{
+      // ignore
+    });
+  });
+  tempPeer.on('error', ()=> {
+    // fallback: become host
+    if(!isHost){
+      isHost=true; startPeer(true); updateRoomInfo(); updateMembers();
+      addMsg('시스템','호스트로 전환', true);
+    }
+  });
+});
+
+/* ========== PIXEL CANVAS (16x16) ========== */
+const pCanvas = document.getElementById('pixelCanvas');
+const pCtx = pCanvas.getContext('2d');
+const PAL = ['#000000','#ffffff','#ff0000','#00ff00','#0000ff','#ffff00','#ff00ff','#00ffff','#ff8800','#888888','#8b4513','#7fff00','#ff1493','#40e0d0','#dda0dd','#00ff7f'];
+let selColor = PAL[2];
+const P = {w:16,h:16,data: Array.from({length:16}, ()=> Array(16).fill('#000000'))};
+function drawPixel(){
+  const cw = pCanvas.clientWidth; const scale = cw / (P.w*1);
+  pCanvas.width = P.w * 20; pCanvas.height = P.h * 20;
+  const px = pCanvas.width / P.w;
+  for(let y=0;y<P.h;y++) for(let x=0;x<P.w;x++){
+    pCtx.fillStyle = P.data[y][x]; pCtx.fillRect(x*px, y*px, px, px);
+    pCtx.strokeStyle = 'rgba(25,255,25,0.06)'; pCtx.strokeRect(x*px, y*px, px, px);
+  }
+}
+function buildPalette(){
+  const palEl = $('#palette'); palEl.innerHTML='';
+  PAL.forEach(c => {
+    const d = document.createElement('div'); d.className='sw'; d.style.background = c;
+    if(c===selColor) d.classList.add('sel');
+    d.addEventListener('click', ()=>{ selColor = c; document.querySelectorAll('.sw').forEach(s=>s.classList.remove('sel')); d.classList.add('sel'); });
+    palEl.appendChild(d);
+  });
+}
+pCanvas.addEventListener('click', e=>{
+  const rect = pCanvas.getBoundingClientRect();
+  const px = pCanvas.width / P.w;
+  const x = Math.floor((e.clientX - rect.left) / px);
+  const y = Math.floor((e.clientY - rect.top) / px);
+  setPixel(x,y,selColor, true);
+});
+function setPixel(x,y,color, local){
+  if(x<0||y<0||x>=P.w||y>=P.h) return;
+  P.data[y][x] = color; drawPixel();
+  const pkt = {type:'pixel', x, y, color, from:nickname};
+  if(isHost) hostBroadcast(pkt);
+  else if(hostConn && hostConn.open) hostConn.send(pkt);
+}
+function applyPixel(x,y,color, fromNetwork=false){
+  if(x<0||y<0||x>=P.w||y>=P.h) return;
+  P.data[y][x] = color; drawPixel();
+}
+function exportPixel(){ return {data:P.data}; }
+function pixelImport(obj){ if(obj?.data) { P.data = obj.data; drawPixel(); } }
+
+buildPalette(); drawPixel();
+
+/* ======= OMOK (다인용 단순화: 참가자 순번으로 턴) ======= */
+const oCanvas = document.getElementById('omokCanvas');
+const oCtx = oCanvas.getContext('2d');
+const O = {n:15, board:[], playing:false, turnIndex:0, order:[], cell:560/15};
+function omokReset(){ O.board = Array.from({length:O.n}, ()=> Array(O.n).fill(0)); O.playing=false; O.turnIndex=0; O.order=[]; drawOmok(); $('#omokStatus').style.display='none'; oCanvas.style.display='none'; }
+function startOmok(){
+  // build order: host first, then guests in connected order
+  if(isHost){
+    O.order = [nickname, ...conns.map(c=>c.name)];
+    // include any later guests? they join as spectators until next game
+  } else {
+    // guests will get order via sync from host
+  }
+  O.board = Array.from({length:O.n}, ()=> Array(O.n).fill(0));
+  O.playing = true; O.turnIndex = 0;
+  drawOmok();
+  oCanvas.style.display='block'; $('#omokStatus').style.display='block';
+  setOmokStatus();
+}
+function setOmokStatus(){
+  const curName = O.order[O.turnIndex] || '(대기)';
+  $('#omokStatus').textContent = `오목 중 — 턴: ${curName} (${O.turnIndex+1}/${O.order.length})`;
+}
+function drawOmok(){
+  oCtx.clearRect(0,0,560,560);
+  oCtx.strokeStyle = '#19ff19';
+  const c = O.cell;
+  for(let i=0;i<O.n;i++){
+    oCtx.beginPath(); oCtx.moveTo(c/2, c/2 + i*c); oCtx.lineTo(560 - c/2, c/2 + i*c); oCtx.stroke();
+    oCtx.beginPath(); oCtx.moveTo(c/2 + i*c, c/2); oCtx.lineTo(c/2 + i*c, 560 - c/2); oCtx.stroke();
+  }
+  for(let y=0;y<O.n;y++) for(let x=0;x<O.n;x++){
+    const v = O.board[y][x]; if(!v) continue;
+    oCtx.beginPath();
+    oCtx.fillStyle = v===1? '#000' : '#fff';
+    oCtx.arc(c/2 + x*c, c/2 + y*c, c*0.38, 0, Math.PI*2); oCtx.fill();
+    oCtx.lineWidth = 1; oCtx.strokeStyle = '#19ff19'; oCtx.stroke();
+  }
+}
+oCanvas.addEventListener('click', e=>{
+  if(!O.playing) return;
+  // which cell?
+  const rect = oCanvas.getBoundingClientRect();
+  const px = oCanvas.width / O.n;
+  const x = Math.floor((e.clientX - rect.left) / px);
+  const y = Math.floor((e.clientY - rect.top) / px);
+  // is it my turn?
+  const myTurnName = O.order[O.turnIndex];
+  if(myTurnName !== nickname){
+    addMsg('시스템','지금은 당신의 턴이 아닙니다.', true);
+    return;
+  }
+  if(O.board[y][x] !== 0) return;
+  // place stone: stone value 1..n -> assign color by order index
+  const stone = (O.turnIndex % 2 === 0) ? 1 : 2; // 간단화: 흑/백 교대
+  O.board[y][x] = stone;
+  drawOmok();
+  // broadcast
+  const pkt = {type:'omok', action:'place', x,y, stone, by:nickname};
+  if(isHost) hostBroadcast(pkt);
+  else if(hostConn && hostConn.open) hostConn.send(pkt);
+  // check win (simple 5-in-row)
+  if(checkWin(x,y,stone)){
+    O.playing=false;
+    $('#omokStatus').textContent = `${nickname} 승리!`;
+    addMsg('시스템', `${nickname} 님이 오목에서 승리했습니다!`, true);
+    const pktEnd = {type:'omok', action:'end', winner:nickname};
+    if(isHost) hostBroadcast(pktEnd);
+    else if(hostConn && hostConn.open) hostConn.send(pktEnd);
+    return;
+  }
+  // advance turn
+  O.turnIndex = (O.turnIndex + 1) % O.order.length;
+  setOmokStatus();
+});
+function checkDir(x,y,dx,dy,stone){
+  let c=1;
+  for(let s=1;s<5;s++){ const nx=x+dx*s, ny=y+dy*s; if(nx<0||ny<0||nx>=O.n||ny>=O.n) break; if(O.board[ny][nx]===stone) c++; else break; }
+  for(let s=1;s<5;s++){ const nx=x-dx*s, ny=y-dy*s; if(nx<0||ny<0||nx>=O.n||ny>=O.n) break; if(O.board[ny][nx]===stone) c++; else break; }
+  return c>=5;
+}
+function checkWin(x,y,stone){
+  return checkDir(x,y,1,0,stone) || checkDir(x,y,0,1,stone) || checkDir(x,y,1,1,stone) || checkDir(x,y,1,-1,stone);
+}
+/* handle omok messages from network */
+function handleOmokMessage(msg, fromPeer){
+  if(msg.action === 'start'){
+    // host initiated: host will broadcast order & sync
+    if(!isHost){
+      // guests will receive sync via sync packet; fallback: start UI
+    }
+    startOmok();
+  } else if(msg.action === 'place'){
+    // place stone from other player
+    if(O.board[msg.y][msg.x] === 0){
+      O.board[msg.y][msg.x] = msg.stone;
+      drawOmok();
+      // advance turn (host manages real turn order but we approximate)
+      if(isHost){
+        // host advances turn and broadcasts turn change as meta
+        O.turnIndex = (O.turnIndex + 1) % O.order.length;
+        hostBroadcast({type:'omok', action:'turn', turnIndex:O.turnIndex});
+        setOmokStatus();
+      }
+    }
+  } else if(msg.action === 'turn'){
+    O.turnIndex = msg.turnIndex;
+    setOmokStatus();
+  } else if(msg.action === 'end'){
+    O.playing=false;
+    $('#omokStatus').textContent = msg.winner + ' 승리!';
+    addMsg('시스템', `${msg.winner} 님이 오목에서 승리했습니다!`, true);
+  }
+}
+/* omok import state (sync) */
+function omokImport(state){
+  if(!state) return;
+  O.board = state.board || O.board;
+  O.playing = state.playing || false;
+  O.order = state.order || O.order;
+  O.turnIndex = state.turnIndex || 0;
+  drawOmok();
+  if(O.playing) { oCanvas.style.display='block'; $('#omokStatus').style.display='block'; setOmokStatus(); }
+  else { $('#omokStatus').style.display='none'; oCanvas.style.display='none'; }
+}
+function omokExport(){
+  return {board:O.board, playing:O.playing, order:O.order, turnIndex:O.turnIndex};
+}
+function omokOnLeave(peerId){
+  // 단순화: 참가자 퇴장 시 순서에서 제거 (host에서만 처리)
+  if(!isHost) return;
+  // find name by peerId
+  const idx = conns.findIndex(c=>c.id===peerId);
+  if(idx>=0){
+    const name = conns[idx].name;
+    O.order = O.order.filter(n=>n!==name);
+    // if current turnIndex beyond length, wrap
+    if(O.turnIndex >= O.order.length) O.turnIndex = 0;
+    hostBroadcast({type:'omok', action:'sync', omok:omokExport()});
+    setOmokStatus();
+  }
+}
+
+/* omok start by host */
+function hostStartOmok(){
+  if(!isHost) return;
+  // host forms order
+  O.order = [nickname, ...conns.map(c=>c.name)];
+  O.board = Array.from({length:O.n}, ()=> Array(O.n).fill(0));
+  O.playing=true; O.turnIndex=0;
+  drawOmok();
+  oCanvas.style.display='block'; $('#omokStatus').style.display='block';
+  setOmokStatus();
+  // broadcast sync
+  hostBroadcast({type:'omok', action:'start', omok:omokExport()});
+}
+
+/* ========== Commands handling ========== */
+function handleCmdLocal(cmd, fromName){
+  if(cmd === '/help'){
+    addMsg('시스템','=== 명령어 ===', true);
+    for(const k in commands) addMsg('시스템', `${k} — ${commands[k]}`, true);
+  } else if(cmd === '/omok start'){
+    if(isHost) {
+      hostStartOmok();
+    } else {
+      // request host to start
+      if(hostConn && hostConn.open) hostConn.send({type:'cmd', text:cmd, name:fromName});
+      else addMsg('시스템','호스트에 연결되어 있지 않습니다.', true);
+    }
+  } else if(cmd === '/clear'){
+    chatLog.innerHTML=''; addMsg('시스템','채팅이 지워졌습니다.', true);
+  } else {
+    addMsg('시스템','알 수 없는 명령어입니다. /help 참조', true);
+  }
+}
+
+/* ========== State export for host ========= */
+function exportState(){
+  return { pixel: exportPixel(), omok: omokExport(), meta: {list:[nickname, ...conns.map(c=>c.name)]} };
+}
+
+/* ========== Pixel export/import ========== */
+function exportPixel(){ return {data:P.data}; }
+
+/* ========== Host broadcast meta updates periodically ========= */
+setInterval(()=> {
+  if(isHost){
+    const list = [nickname, ...conns.map(c=>c.name)];
+    hostBroadcast({type:'meta', list});
+  }
+}, 2000);
+
+/* ========== Host: when new guest joins, send full state ========== */
+/* implemented in sendStateTo(conn) earlier */
+
+/* ========== Guest / Host message sending helpers ========= */
+function sendChat(text){
+  addMsg(nickname, text, true);
+  const pkt = {type:'chat', name:nickname, text};
+  if(isHost) hostBroadcast(pkt);
+  else if(hostConn && hostConn.open) hostConn.send(pkt);
+}
+
+/* ========== Helper to update members after host start ========== */
+function updateMembersUI(list){
+  if(Array.isArray(list)) membersEl.textContent = '참가자: ' + list.join(', ');
+}
+
+/* ========== Wire guestOnData meta handling adaptation ========= */
+function updateMembersFromHostList(list){
+  if(Array.isArray(list)) membersEl.textContent = '참가자: ' + list.join(', ');
+}
+
+/* ===== init from URL param when available ===== */
+(function tryAutoRoom(){
+  const params = new URLSearchParams(location.search);
+  const r = params.get('r');
+  if(r){ roomIdInput.value = r; userNameInput.focus(); }
+})();
+
+/* ===== shortcut UI actions ===== */
+$('#chatForm').addEventListener('submit', e=>{ e.preventDefault(); const txt = chatInput.value.trim(); if(txt) { if(txt.startsWith('/')) handleCmdLocal(txt, nickname); else { sendChat(txt);} // broadcast handled in sendChat
+ chatInput.value=''; });
+$('#btnHelp').addEventListener('click', ()=> handleCmdLocal('/help', nickname));
+$('#btnOmok').addEventListener('click', ()=> handleCmdLocal('/omok start', nickname));
+
+/* ===== window unload cleanup ===== */
+window.addEventListener('beforeunload', ()=> { try{ peer && peer.destroy(); }catch(e){} });
+
+/* ===== initial omok reset ===== */
+omokReset();
+
+</script>
+</body>
+</html>
