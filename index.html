@@ -1,7 +1,104 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>P2P 채팅 (레트로 UI 유지)</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  /* 레트로 UI (스샷과 동일 레이아웃/느낌) */
+  :root{--bg:#0c0c0c;--panel:#0f0f0f;--crt:#19ff19;--muted:#4be04b;}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:#080808;color:#bfffbf;font-family:'Share Tech Mono',monospace}
+  .outer{max-width:1320px;margin:10px auto;padding:10px;border:4px solid var(--crt);height:calc(100vh - 40px);display:flex;flex-direction:column;gap:10px}
+  header{background:#042004;color:var(--crt);text-align:center;padding:10px;font-size:1.4rem}
+  .topRow{display:flex;gap:8px;align-items:center}
+  .topRow input{background:#0b0b0b;border:1px solid rgba(25,255,25,0.08);color:var(--muted);padding:10px;border-radius:6px;min-width:140px}
+  .topRight{margin-left:auto;color:var(--muted)}
+  .main{flex:1;display:flex;gap:12px;min-height:0}
+  .left{flex:0 1 48%;background:var(--panel);border:2px solid rgba(25,255,25,0.06);display:flex;flex-direction:column;padding:12px}
+  .right{flex:0 1 52%;background:var(--panel);border:2px solid rgba(25,255,25,0.06);display:flex;flex-direction:column;padding:12px;align-items:center}
+  #chatLog{flex:1;background:#040404;border:2px solid rgba(25,255,25,0.04);padding:12px;overflow:auto}
+  .msg{margin:8px 0}
+  .ts{color:#0f7;margin-right:6px;font-size:0.9rem}
+  .name{color:var(--muted);margin-right:6px;font-weight:700}
+  .chatForm{display:flex;gap:8px;margin-top:12px}
+  .chatForm input{flex:1;padding:10px;background:#0b0b0b;border:1px solid rgba(25,255,25,0.04);color:var(--muted);border-radius:6px}
+  .chatForm button{background:#071; color:#011;border:none;padding:8px 12px;border-radius:6px;cursor:pointer}
+  .controls{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+  .controls button{background:#0b0b0b;border:1px solid rgba(25,255,25,0.06);color:var(--muted);padding:6px 10px;border-radius:6px;cursor:pointer}
+  .canvasWrap{width:100%;display:flex;flex-direction:column;align-items:center;gap:10px}
+  #pixelCanvas{width:90%;max-width:560px;background:#020;border:3px solid rgba(25,255,25,0.12);image-rendering:pixelated;touch-action:none}
+  #omokCanvas{display:none;width:90%;max-width:560px;background:#020;border:3px solid rgba(25,255,25,0.12)}
+  .palette{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:6px}
+  .sw{width:22px;height:22px;border:1px solid #000;cursor:pointer}
+  .sw.sel{outline:2px solid #fff}
+  .footer{color:#8f8;text-align:center;padding:6px}
+  .membersLine{margin-top:8px;color:var(--muted)}
+  .brushBox{display:flex;align-items:center;gap:8px;color:var(--muted)}
+  select,input[type=number]{background:#0b0b0b;color:var(--muted);border:1px solid rgba(25,255,25,0.06);padding:6px;border-radius:6px}
+  @media(max-width:900px){ .main{flex-direction:column} .left,.right{flex:1 1 auto}}
+</style>
+</head>
+<body>
+<div class="outer">
+  <header>P2P 채팅</header>
+
+  <div class="topRow">
+    <input id="userName" placeholder="닉네임" />
+    <input id="roomId" placeholder="방 코드(비워두면 자동)" />
+    <div class="topRight" id="roomInfo">방: — | ID: —</div>
+  </div>
+
+  <div class="main">
+    <div class="left">
+      <div id="chatLog" aria-live="polite"></div>
+
+      <form id="chatForm" class="chatForm" autocomplete="off">
+        <input id="chatInput" placeholder="메시지 입력 — /help로 명령어 확인" />
+        <button type="submit">전송</button>
+      </form>
+
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button id="btnHelp">/help</button>
+        <button id="btnOmok">/omok start</button>
+        <button id="btnClear">채팅 지우기</button>
+      </div>
+
+      <div class="membersLine" id="members">참가자: -</div>
+    </div>
+
+    <div class="right">
+      <div class="controls">
+        <button id="modeDraw">그리기</button>
+        <button id="modeEraser">지우개</button>
+        <button id="modeGame">오목 모드</button>
+        <div class="brushBox">브러쉬 크기: <input id="brushSize" type="number" min="1" max="12" value="2" style="width:60px"></div>
+      </div>
+
+      <div class="canvasWrap">
+        <canvas id="pixelCanvas" width="480" height="480" aria-label="그림판"></canvas>
+        <canvas id="omokCanvas" width="560" height="560" aria-label="오목판"></canvas>
+        <div class="palette" id="palette"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">시그널링: PeerJS Cloud (HTTPS); 모든 데이터는 참가자 브라우저 간 전송됩니다.</div>
+</div>
+
+<!-- PeerJS + App Script -->
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
+/*
+  이 파일은 "UI는 그대로" 유지하면서 동작하도록 설계되었습니다.
+  HTML의 ID들(userName, roomId, chatLog, chatForm, chatInput, btnHelp, btnOmok, btnClear,
+  modeDraw, modeEraser, modeGame, brushSize, pixelCanvas, omokCanvas, palette, members, roomInfo)
+  을 그대로 사용합니다.
+*/
+
 window.onload = () => {
-  // --- DOM elements (expects these IDs from your UI) ---
+  // --- DOM references ---
   const userNameInput = document.getElementById('userName');
   const roomIdInput = document.getElementById('roomId');
   const chatLog = document.getElementById('chatLog');
@@ -13,45 +110,39 @@ window.onload = () => {
   const membersEl = document.getElementById('members');
   const roomInfo = document.getElementById('roomInfo');
 
-  const pixelCanvas = document.getElementById('pixelCanvas');
-  const paletteEl = document.getElementById('palette');
-  const omokCanvas = document.getElementById('omokCanvas');
-  const omokStatus = document.getElementById('omokStatus');
-
   const modeDrawBtn = document.getElementById('modeDraw');
   const modeEraserBtn = document.getElementById('modeEraser');
   const modeGameBtn = document.getElementById('modeGame');
-  const brushSizeSel = document.getElementById('brushSize');
+  const brushSizeInput = document.getElementById('brushSize');
 
-  // Fallbacks for element absence
-  if(!chatLog || !chatInput || !pixelCanvas) {
-    console.error('필수 UI 요소가 없습니다. 스크립트가 올바른 HTML과 함께 사용되는지 확인하세요.');
+  const pixelCanvas = document.getElementById('pixelCanvas');
+  const omokCanvas = document.getElementById('omokCanvas');
+  const paletteEl = document.getElementById('palette');
+
+  // validate required elements
+  if(!chatLog || !chatForm || !chatInput || !pixelCanvas){
+    console.error('필수 UI 요소 없음 — HTML 구조가 달라졌습니다.');
     return;
   }
 
-  // --- helpers ---
+  // --- small helpers ---
   const now = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  function addSystem(msg, local=false) {
-    const div = document.createElement('div');
-    div.className = 'msg';
-    div.innerHTML = `<span class="ts">[${now()}]</span> <span class="name">시스템</span> ${msg}`;
-    if(local) div.style.color = '#8f8';
-    chatLog.appendChild(div);
-    chatLog.scrollTop = chatLog.scrollHeight;
+  function addSystem(text, local=false){
+    const d = document.createElement('div'); d.className='msg';
+    d.innerHTML = `<span class="ts">[${now()}]</span> <span class="name">시스템</span> ${text}`;
+    if(local) d.style.color = '#8f8';
+    chatLog.appendChild(d); chatLog.scrollTop = chatLog.scrollHeight;
   }
-  function addChat(name, text, local=false) {
-    const div = document.createElement('div');
-    div.className = 'msg';
-    div.innerHTML = `<span class="ts">[${now()}]</span> <span class="name">${escapeHtml(name)}</span> ${escapeHtml(text)}`;
-    if(local) div.style.color = '#8f8';
-    chatLog.appendChild(div);
-    chatLog.scrollTop = chatLog.scrollHeight;
+  function addChat(name, text, local=false){
+    const d = document.createElement('div'); d.className='msg';
+    d.innerHTML = `<span class="ts">[${now()}]</span> <span class="name">${escapeHtml(name)}</span> ${escapeHtml(text)}`;
+    if(local) d.style.color = '#8f8';
+    chatLog.appendChild(d); chatLog.scrollTop = chatLog.scrollHeight;
   }
-  function escapeHtml(s=''){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function escapeHtml(s=''){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
-  // --- P2P setup (HTTPS-ready + ICE, mesh discovery) ---
-  // Use PeerJS HTTPS server + ICE servers for better connectivity on GitHub Pages
-  const peerConfig = {
+  // --- P2P config (HTTPS + ICE) ---
+  const peerOptions = {
     host: 'peerjs-server.herokuapp.com',
     port: 443,
     secure: true,
@@ -63,448 +154,337 @@ window.onload = () => {
     }
   };
 
-  let nickname = (userNameInput && userNameInput.value) ? userNameInput.value.trim() : ('Guest' + Math.random().toString(36).slice(2,6));
-  if(userNameInput) userNameInput.value = nickname;
-  let roomId = (roomIdInput && roomIdInput.value) ? roomIdInput.value.trim().slice(0,6) : (new URLSearchParams(location.search).get('r') || Math.random().toString(36).slice(2,8).toUpperCase().slice(0,6));
-  if(roomIdInput) roomIdInput.value = roomId;
+  // nickname & roomId defaults
+  let nickname = (userNameInput.value||'').trim() || ('Guest'+Math.random().toString(36).slice(2,6));
+  userNameInput.value = nickname;
+  let roomId = (roomIdInput.value||'').trim();
+  if(!roomId) {
+    const urlRoom = new URLSearchParams(location.search).get('r');
+    roomId = (urlRoom && urlRoom.slice(0,6)) || (Math.random().toString(36).slice(2,8).toUpperCase().slice(0,6));
+    roomIdInput.value = roomId;
+  } else {
+    roomId = roomId.slice(0,6);
+    roomIdInput.value = roomId;
+  }
 
-  // create peer AFTER DOM loaded
   let peer = null;
-  let myPeerId = '';
-  const conns = {}; // peerId -> DataConnection (stores .name)
-  function startPeer() {
+  let myId = '';
+  const conns = {}; // peerId -> conn (stores .name)
+
+  function startPeer(){
     try {
-      peer = new Peer(`room-${roomId}-${Math.random().toString(36).slice(2,8)}`, peerConfig);
-    } catch(e) {
-      addSystem('Peer 초기화 실패: ' + e, true);
+      peer = new Peer(`room-${roomId}-${Math.random().toString(36).slice(2,8)}`, peerOptions);
+    } catch(e){
+      addSystem('Peer 초기화 실패: '+e, true);
+      console.error(e);
       return;
     }
     peer.on('open', id => {
-      myPeerId = id;
+      myId = id;
       addSystem(`내 ID: ${id}`, true);
-      roomInfo && (roomInfo.textContent = `방: ${roomId} | ID: ${id}`);
-      discoverLoop();
-      setInterval(discoverLoop, 2500);
+      roomInfo.textContent = `방: ${roomId} | ID: ${id}`;
+      discoverPeers();
+      setInterval(discoverPeers, 2500);
     });
-    peer.on('connection', conn => {
-      setupConn(conn);
+    peer.on('connection', c => {
+      acceptConn(c);
     });
     peer.on('error', err => {
       addSystem('Peer 오류: ' + (err && err.message ? err.message : String(err)), true);
-      console.error(err);
+      console.error('Peer error', err);
     });
   }
 
-  // discover peers with same roomId prefix via listAllPeers (best-effort)
-  function discoverLoop() {
+  function discoverPeers(){
     if(!peer || !peer.listAllPeers) return;
-    try {
+    try{
       peer.listAllPeers(peers => {
-        peers.filter(id => id.startsWith(`room-${roomId}-`) && id !== myPeerId)
+        peers.filter(id => id.startsWith(`room-${roomId}-`) && id !== myId)
              .forEach(id => { if(!conns[id]) connectToPeer(id); });
       });
-    } catch(e) {
-      // listAllPeers may be disabled; ignore silently
-      // If this fails for your PeerJS server, consider Firebase signaling (we can swap later)
+    } catch(e){
+      // listAllPeers may be disabled on some PeerJS servers — that's okay
+      // we rely on incoming connections or manual share of IDs in that case
+      // console.warn('listAllPeers failed', e);
     }
   }
 
-  function connectToPeer(id) {
-    try {
+  function connectToPeer(id){
+    try{
       const c = peer.connect(id, { reliable:true });
       c.on('open', ()=> {
-        setupConn(c);
-        // handshake: announce name and request sync
-        safeSend(c, { type:'meta', name:nickname });
-        safeSend(c, { type:'sync-request', from: myPeerId });
+        acceptConn(c);
+        // handshake
+        safeSend(c, { type:'meta', name: nickname });
+        safeSend(c, { type:'sync-request', from: myId });
       });
       c.on('error', ()=>{});
-    } catch(e){ /* ignore */ }
+    }catch(e){}
   }
 
-  function setupConn(conn) {
+  function acceptConn(conn){
     const pid = conn.peer;
-    if(conns[pid]) {
-      // already exist — attach handlers only
-      // but keep one connection object
-    } else {
-      conns[pid] = conn;
-    }
-    conn.on('data', data => {
-      handleIncoming(pid, data);
-    });
+    conns[pid] = conn;
+    conn.on('data', data => handleIncoming(pid, data));
     conn.on('open', () => {
-      // send our meta so others know our name
       safeSend(conn, { type:'meta', name: nickname });
-      addSystem(`연결: ${pid}`, true);
+      addSystem(`연결됨: ${pid}`, true);
       updateMembers();
-      // request sync from peer (they may be host of some state)
-      safeSend(conn, { type:'sync-request', from: myPeerId });
+      // request sync
+      safeSend(conn, { type:'sync-request', from: myId });
     });
-    conn.on('close', () => {
+    conn.on('close', ()=> {
       delete conns[pid];
       addSystem(`퇴장: ${pid}`, true);
       updateMembers();
     });
   }
 
-  function safeSend(conn, pkt){
-    try{ if(conn && conn.open) conn.send(pkt); } catch(e){ /* ignore */ }
-  }
-
-  function broadcast(pkt){
-    Object.values(conns).forEach(c => safeSend(c, pkt));
-  }
+  function safeSend(conn, pkt){ try{ if(conn && conn.open) conn.send(pkt); }catch(e){} }
+  function broadcast(pkt){ Object.values(conns).forEach(c=> safeSend(c,pkt)); }
 
   function updateMembers(){
     const names = [nickname];
-    Object.values(conns).forEach(c => { if(c && c.name) names.push(c.name); });
-    if(membersEl) membersEl.textContent = '참가자: ' + Array.from(new Set(names)).join(', ');
+    Object.values(conns).forEach(c => { if(c.name) names.push(c.name); });
+    membersEl.textContent = '참가자: ' + Array.from(new Set(names)).join(', ');
   }
+  function getNamesList(){ const arr=[nickname]; Object.values(conns).forEach(c=>{ if(c.name) arr.push(c.name); }); return Array.from(new Set(arr)); }
 
-  function handleIncoming(fromId, msg) {
+  // --- Incoming message handling ---
+  function handleIncoming(fromId, msg){
     if(!msg || !msg.type) return;
-    switch(msg.type) {
+    switch(msg.type){
       case 'meta':
         if(conns[fromId]) conns[fromId].name = msg.name || fromId;
-        updateMembers();
-        break;
+        updateMembers(); break;
       case 'chat':
-        addChat(msg.name || fromId, msg.text || '');
-        break;
+        addChat(msg.name||fromId, msg.text||''); break;
       case 'cmd':
-        // simple: others broadcast; handle /help and /omok start
         if(msg.text === '/help') showHelp();
-        if(msg.text === '/omok start') startOmokLocal(false);
+        if(msg.text === '/omok start') startOmok(false);
+        if(msg.text === '/clear') { chatLog.innerHTML=''; addSystem('채팅 초기화', true); }
         break;
       case 'draw':
-        // draw stroke from peer
-        incomingDraw(msg);
-        break;
-      case 'pixel':
-        // legacy pixel cell change (if used) - ignore or apply
-        break;
-      case 'omok':
-        handleOmokNetwork(msg);
-        break;
+        applyRemoteStroke(msg); break;
       case 'sync-request':
-        // peer asks for current state -> send sync
-        sendFullSyncToPeer(fromId);
-        break;
+        sendFullSyncTo(fromId); break;
       case 'sync':
-        // receive full state
-        if(msg.pixel) importDrawingState(msg.pixel);
+        if(msg.pixel) importDrawing(msg.pixel);
         if(msg.omok) importOmok(msg.omok);
         if(msg.meta && Array.isArray(msg.meta.names)) updateMembersFromList(msg.meta.names);
         break;
+      case 'omok':
+        handleOmokNetwork(msg); break;
       case 'system':
-        addSystem(msg.text || '', true);
-        break;
-      default:
-        // ignore
-        break;
+        addSystem(msg.text||'', true); break;
+      default: break;
     }
   }
 
-  function sendFullSyncToPeer(peerId){
+  function updateMembersFromList(list){ if(Array.isArray(list)) membersEl.textContent = '참가자: ' + Array.from(new Set(list)).join(', '); }
+  function sendFullSyncTo(peerId){
     const c = conns[peerId];
     if(!c) return;
-    const pkt = { type:'sync', pixel: exportDrawingState(), omok: exportOmokState(), meta:{names:getNamesList()} };
+    const pkt = { type:'sync', pixel: exportDrawing(), omok: exportOmok(), meta:{names:getNamesList()} };
     safeSend(c, pkt);
   }
-  function updateMembersFromList(list){
-    if(Array.isArray(list)) {
-      if(membersEl) membersEl.textContent = '참가자: ' + Array.from(new Set(list)).join(', ');
-    }
-  }
-  function getNamesList(){
-    const arr = [nickname];
-    Object.values(conns).forEach(c=>{ if(c.name) arr.push(c.name); });
-    return Array.from(new Set(arr));
-  }
 
-  // --- Chat UI wiring ---
-  if(chatForm) {
-    chatForm.addEventListener('submit', e => {
-      e.preventDefault();
-      const txt = (chatInput.value || '').trim();
-      if(!txt) return;
-      if(txt.startsWith('/')) {
-        // local handle and broadcast as cmd
-        handleLocalCmd(txt);
-        broadcast({ type:'cmd', text: txt, from: nickname });
-      } else {
-        addChat(nickname, txt, true);
-        broadcast({ type:'chat', name: nickname, text: txt });
-      }
-      chatInput.value = '';
-    });
-  }
-  if(btnHelp) btnHelp.addEventListener('click', ()=>{ handleLocalCmd('/help'); broadcast({type:'cmd', text:'/help', from:nickname}); });
-  if(btnClear) btnClear.addEventListener('click', ()=>{ chatLog.innerHTML=''; broadcast({type:'cmd', text:'/clear', from:nickname}); });
-
-  function addChat(name, text, local=false){ addChat(name, text, local); } // placeholder to keep API consistent
-  function showHelp(){
-    addSystem('=== 명령어 ===', true);
-    for(const k in commands) addSystem(`${k} — ${commands[k]}`, true);
-  }
-
-  const commands = {'/help':'명령어 목록', '/omok start':'오목 시작', '/clear':'채팅 지우기'};
-
-  function handleLocalCmd(cmd) {
-    if(cmd === '/help') {
-      addSystem('=== 명령어 ===', true);
-      for(const k in commands) addSystem(`${k} — ${commands[k]}`, true);
-    } else if(cmd === '/omok start') {
-      startOmokLocal(true); // local and broadcast
-    } else if(cmd === '/clear') {
-      chatLog.innerHTML='';
-      addSystem('채팅이 지워졌습니다.', true);
+  // --- Chat wiring ---
+  chatForm.addEventListener('submit', e=>{
+    e.preventDefault();
+    const txt = (chatInput.value||'').trim();
+    if(!txt) return;
+    if(txt.startsWith('/')){
+      handleLocalCmd(txt);
+      broadcast({ type:'cmd', text: txt, from: nickname });
     } else {
-      addSystem('알 수 없는 명령어', true);
+      addChat(nickname, txt, true);
+      broadcast({ type:'chat', name: nickname, text: txt });
     }
-  }
+    chatInput.value = '';
+  });
+  btnHelp.addEventListener('click', ()=> { handleLocalCmd('/help'); broadcast({ type:'cmd', text:'/help', from:nickname }); });
+  btnClear.addEventListener('click', ()=> { chatLog.innerHTML=''; broadcast({ type:'cmd', text:'/clear', from:nickname }); });
+  btnOmok.addEventListener('click', ()=> { handleLocalCmd('/omok start'); broadcast({type:'cmd', text:'/omok start', from:nickname}); });
 
-  // --- Drawing canvas (freehand brush, small sizes, correct coords) ---
-  const drawCanvas = pixelCanvas; // keep naming consistent with UI
-  const dctx = drawCanvas.getContext('2d');
-  let currentMode = 'draw'; // draw | eraser | game
-  let brushSize = (brushSizeSel ? parseInt(brushSizeSel.value || '3') : 3);
+  function handleLocalCmd(cmd){
+    if(cmd==='/help'){ addSystem('=== 명령어 ===', true); for(const k in commands) addSystem(`${k} — ${commands[k]}`, true); }
+    else if(cmd==='/omok start'){ startOmok(true); }
+    else if(cmd==='/clear'){ chatLog.innerHTML=''; addSystem('채팅 지움', true); }
+    else addSystem('알 수 없는 명령어', true);
+  }
+  const commands = {'/help':'명령어 목록','/omok start':'오목 시작','/clear':'채팅 지우기'};
+
+  // --- Drawing: freehand brush (small, smooth), coordinate accuracy, color palette ---
+  const dCanvas = pixelCanvas;
+  const dctx = dCanvas.getContext('2d');
+  let dpr = window.devicePixelRatio || 1;
+  function resizeDrawingCanvas(){
+    const rect = dCanvas.getBoundingClientRect();
+    dCanvas.width = Math.max(320, Math.floor(rect.width * dpr));
+    dCanvas.height = Math.max(320, Math.floor(rect.height * dpr));
+    dCanvas.style.width = `${rect.width}px`;
+    dCanvas.style.height = `${rect.height}px`;
+    dctx.lineCap = 'round'; dctx.lineJoin='round';
+    redrawGrid(); // ensure grid overlay (if present) remains visually aligned
+  }
+  function redrawGrid(){ /* your CSS grid canvas keeps drawing; we ensure drawing canvas size matches */ }
+
+  // brush state
+  let currentMode = 'draw'; // 'draw' | 'eraser' | 'game'
+  let brushSize = parseInt(brushSizeInput.value || '2',10);
   let drawing = false;
-  let last = null;
+  let lastPos = null;
+  let selectedColor = '#00ff00';
 
-  // ensure canvas is sized to element display size and scale internal resolution for crisp lines
-  function resizeDrawCanvas() {
-    const rect = drawCanvas.getBoundingClientRect();
-    // use devicePixelRatio scaling for crisp lines
-    const dpr = window.devicePixelRatio || 1;
-    drawCanvas.width = Math.max(300, Math.floor(rect.width * dpr));
-    drawCanvas.height = Math.max(300, Math.floor(rect.height * dpr));
-    drawCanvas.style.width = `${rect.width}px`;
-    drawCanvas.style.height = `${rect.height}px`;
-    dctx.lineCap = 'round'; dctx.lineJoin = 'round';
-    redrawGridOverlayIfNeeded();
-  }
-  // redraw grid (if your UI expects a grid drawn by separate canvas, that remains untouched)
-  function redrawGridOverlayIfNeeded(){ /* no-op: your existing CSS grid canvas remains; this ensures draw canvas matches size */ }
-
-  // pointer event coordinates mapping to canvas internal coords
-  function getCanvasPos(evt) {
-    const rect = drawCanvas.getBoundingClientRect();
-    const dpr = (window.devicePixelRatio || 1);
+  function getPos(evt){
+    const rect = dCanvas.getBoundingClientRect();
     const x = Math.round((evt.clientX - rect.left) * dpr);
     const y = Math.round((evt.clientY - rect.top) * dpr);
-    return { x, y };
+    return {x,y};
   }
 
-  // incoming draw strokes from peers
-  function incomingDraw(pkt) {
-    if(!pkt) return;
-    try {
-      dctx.save();
-      dctx.globalCompositeOperation = 'source-over';
-      dctx.strokeStyle = pkt.color || '#00ff00';
-      dctx.lineWidth = pkt.width || 2;
-      dctx.beginPath();
-      dctx.moveTo(pkt.fromX, pkt.fromY);
-      dctx.lineTo(pkt.toX, pkt.toY);
-      dctx.stroke();
-      dctx.restore();
-    } catch(e){ console.warn('incomingDraw error', e); }
-  }
-
-  // export/import drawing state (simple base64 snapshot)
-  function exportDrawingState(){
-    try { return { img: drawCanvas.toDataURL() }; }
-    catch(e){ return null; }
-  }
-  function importDrawingState(state){
-    if(!state || !state.img) return;
-    const img = new Image();
-    img.onload = ()=> { dctx.drawImage(img, 0, 0, drawCanvas.width, drawCanvas.height); };
-    img.src = state.img;
-  }
-
-  // broadcast stroke piece (small objects)
-  function broadcastStroke(fromX, fromY, toX, toY, color, width){
-    const pkt = { type:'draw', fromX, fromY, toX, toY, color, width };
-    broadcast(pkt);
-  }
-
-  // pointer events
-  drawCanvas.addEventListener('pointerdown', e => {
-    if(currentMode === 'game') return;
-    drawing = true;
-    last = getCanvasPos(e);
-  });
-  drawCanvas.addEventListener('pointermove', e => {
-    if(!drawing || currentMode === 'game') return;
-    const pos = getCanvasPos(e);
-    const color = (currentMode === 'eraser') ? '#000000' : (window.getComputedStyle ? window.getComputedStyle(drawCanvas).color || '#00ff00' : '#00ff00');
-    dctx.strokeStyle = (currentMode === 'eraser') ? '#000000' : (selectedColor || '#00ff00');
-    dctx.lineWidth = brushSize * (window.devicePixelRatio || 1);
+  function applyStroke(fromX,fromY,toX,toY,color,width){
+    dctx.save();
+    dctx.strokeStyle = color;
+    dctx.lineWidth = width;
     dctx.beginPath();
-    dctx.moveTo(last.x, last.y);
-    dctx.lineTo(pos.x, pos.y);
+    dctx.moveTo(fromX,fromY);
+    dctx.lineTo(toX,toY);
     dctx.stroke();
-    // broadcast normalized coords (we transmit internal canvas coords)
-    broadcastStroke(last.x, last.y, pos.x, pos.y, dctx.strokeStyle, dctx.lineWidth);
-    last = pos;
+    dctx.restore();
+  }
+
+  function applyRemoteStroke(pkt){
+    if(!pkt) return;
+    applyStroke(pkt.fromX,pkt.fromY,pkt.toX,pkt.toY,pkt.color || '#00ff00', pkt.width || (brushSize * dpr));
+  }
+
+  function broadcastStroke(fx,fy,tx,ty,color,w){
+    broadcast({ type:'draw', fromX:fx, fromY:fy, toX:tx, toY:ty, color, width: w });
+  }
+
+  dCanvas.addEventListener('pointerdown', e=>{
+    if(currentMode === 'game') return;
+    dCanvas.setPointerCapture(e.pointerId);
+    drawing = true;
+    lastPos = getPos(e);
   });
-  drawCanvas.addEventListener('pointerup', e => { drawing = false; last = null; });
-  drawCanvas.addEventListener('pointercancel', () => { drawing = false; last = null; });
-  drawCanvas.addEventListener('pointerout', () => { drawing = false; last = null; });
+  dCanvas.addEventListener('pointermove', e=>{
+    if(!drawing || currentMode === 'game') return;
+    const p = getPos(e);
+    const col = currentMode === 'eraser' ? '#000000' : selectedColor;
+    const w = Math.max(1, brushSize) * dpr;
+    applyStroke(lastPos.x, lastPos.y, p.x, p.y, col, w);
+    broadcastStroke(lastPos.x, lastPos.y, p.x, p.y, col, w);
+    lastPos = p;
+  });
+  dCanvas.addEventListener('pointerup', e=>{ drawing=false; try{ dCanvas.releasePointerCapture(e.pointerId);}catch(e){} lastPos=null; });
+  dCanvas.addEventListener('pointercancel', ()=>{ drawing=false; lastPos=null; });
 
   // brush controls
-  if(brushSizeSel) brushSizeSel.addEventListener('input', ()=> { brushSize = parseInt(brushSizeSel.value || '3'); });
-  if(modeDrawBtn) modeDrawBtn.addEventListener('click', ()=> { currentMode='draw'; modeDrawBtn.disabled=true; modeEraserBtn.disabled=false; modeGameBtn.disabled=false; });
-  if(modeEraserBtn) modeEraserBtn.addEventListener('click', ()=> { currentMode='eraser'; modeEraserBtn.disabled=true; modeDrawBtn.disabled=false; modeGameBtn.disabled=false; });
-  if(modeGameBtn) modeGameBtn.addEventListener('click', ()=> { handleLocalCmd('/omok start'); broadcast({type:'cmd', text:'/omok start', from:nickname}); });
+  brushSizeInput.addEventListener('input', ()=> { brushSize = Math.max(1, parseInt(brushSizeInput.value||'2')); });
+  modeDrawBtn.addEventListener('click', ()=> { currentMode='draw'; modeDrawBtn.disabled=true; modeEraserBtn.disabled=false; modeGameBtn.disabled=false; });
+  modeEraserBtn.addEventListener('click', ()=> { currentMode='eraser'; modeDrawBtn.disabled=false; modeEraserBtn.disabled=true; modeGameBtn.disabled=false; });
+  modeGameBtn.addEventListener('click', ()=> { handleLocalCmd('/omok start'); broadcast({type:'cmd', text:'/omok start', from:nickname}); });
 
-  // color palette (if paletteEl exists) - simple default set
-  let selectedColor = '#00ff00';
+  // palette
   function buildPalette(){
     if(!paletteEl) return;
-    const colors = ['#000000','#ffffff','#ff0000','#00ff00','#0000ff','#ffff00','#ff00ff','#00ffff','#ff8800','#888888'];
+    const colors = ['#000000','#ffffff','#ff0000','#00ff00','#0000ff','#ffff00','#ff00ff','#00ffff','#ff8800','#888888','#8b4513','#7fff00','#ff1493','#40e0d0','#dda0dd','#00ff7f'];
     paletteEl.innerHTML = '';
     colors.forEach(c => {
-      const d = document.createElement('div');
-      d.className = 'sw';
-      d.style.background = c;
-      d.style.width = '20px'; d.style.height='20px'; d.style.margin='2px'; d.style.cursor='pointer';
-      d.addEventListener('click', ()=> { selectedColor = c; /* update visual */ });
-      paletteEl.appendChild(d);
+      const el = document.createElement('div'); el.className='sw'; el.style.background = c;
+      if(c===selectedColor) el.classList.add('sel');
+      el.addEventListener('click', ()=> { selectedColor = c; document.querySelectorAll('#palette .sw').forEach(x=>x.classList.remove('sel')); el.classList.add('sel'); });
+      paletteEl.appendChild(el);
     });
   }
 
-  // --- Omok logic (local-start, network sync) ---
+  // export/import drawing
+  function exportDrawing(){ try{ return { img: dCanvas.toDataURL() }; }catch(e){ return null; } }
+  function importDrawing(obj){ if(!obj || !obj.img) return; const img = new Image(); img.onload = ()=> { dctx.clearRect(0,0,dCanvas.width,dCanvas.height); dctx.drawImage(img,0,0,dCanvas.width,dCanvas.height); }; img.src = obj.img; }
+
+  // --- Omok (turn assignment deterministic by name sort) ---
   const OM = { n:15, board:[], playing:false, order:[], turnIndex:0 };
-  function omokReset(){ OM.board = Array.from({length:OM.n}, ()=> Array(OM.n).fill(0)); OM.playing=false; OM.order=[]; OM.turnIndex=0; drawOmok(); omokCanvas.classList.add('hidden'); omokStatus && (omokStatus.classList.add('hidden')); currentMode='draw'; }
-  function startOmokLocal(broadcastStart=true){
-    // deterministic order: names sorted to avoid race
+  function omokReset(){ OM.board = Array.from({length:OM.n}, ()=> Array(OM.n).fill(0)); OM.playing=false; OM.order=[]; OM.turnIndex=0; drawOmok(); omokCanvas.style.display='none'; if(omokStatus) omokStatus.style.display='none'; currentMode='draw'; modeDrawBtn.disabled=true; modeEraserBtn.disabled=false; modeGameBtn.disabled=false; }
+  function startOmok(broadcastStart=true){
     OM.order = getNamesList().slice().sort();
     OM.board = Array.from({length:OM.n}, ()=> Array(OM.n).fill(0));
     OM.playing = true; OM.turnIndex = 0;
+    omokCanvas.style.display = 'block';
+    if(omokStatus) omokStatus.style.display = 'block';
     drawOmok();
-    omokCanvas.classList.remove('hidden');
-    omokStatus && (omokStatus.classList.remove('hidden'));
     setOmokStatus();
-    if(broadcastStart) broadcast({type:'omok', action:'start', omok: exportOmokState()});
     currentMode = 'game';
+    modeGameBtn.disabled = true;
+    if(broadcastStart) broadcast({ type:'omok', action:'start', omok: exportOmok() });
   }
-
   function setOmokStatus(){ if(omokStatus) omokStatus.textContent = `오목 — 턴: ${OM.order[OM.turnIndex] || '(대기)'}`; }
-
-  // ensure omokCanvas size matches display (using CSS size if any)
-  function resizeOmokCanvas(){
-    if(!omokCanvas) return;
-    const rect = omokCanvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    omokCanvas.width = Math.floor(rect.width * dpr) || OM.n * 20;
-    omokCanvas.height = Math.floor(rect.height * dpr) || OM.n * 20;
-    drawOmok();
-  }
-
+  function resizeOmok(){ const rect = omokCanvas.getBoundingClientRect(); const r = window.devicePixelRatio || 1; omokCanvas.width = Math.floor(rect.width * r) || OM.n*20; omokCanvas.height = Math.floor(rect.width * r) || OM.n*20; drawOmok(); }
   function drawOmok(){
-    if(!omokCanvas) return;
-    const ctx = omokCanvas.getContext('2d');
-    ctx.clearRect(0,0,omokCanvas.width,omokCanvas.height);
+    const ctx = omokCanvas.getContext('2d'); ctx.clearRect(0,0,omokCanvas.width,omokCanvas.height);
     const c = Math.floor(omokCanvas.width / OM.n);
-    ctx.strokeStyle = '#19ff19';
-    ctx.lineWidth = 1;
-    for(let i=0;i<OM.n;i++){
-      ctx.beginPath(); ctx.moveTo(c/2, c/2 + i*c); ctx.lineTo(omokCanvas.width-c/2, c/2 + i*c); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(c/2 + i*c, c/2); ctx.lineTo(c/2 + i*c, omokCanvas.height - c/2); ctx.stroke();
-    }
-    for(let y=0;y<OM.n;y++){
-      for(let x=0;x<OM.n;x++){
-        const v = OM.board[y][x];
-        if(!v) continue;
-        ctx.beginPath();
-        ctx.fillStyle = (v===1? '#000' : '#fff');
-        ctx.arc(c/2 + x*c, c/2 + y*c, c*0.38, 0, Math.PI*2);
-        ctx.fill();
-        ctx.lineWidth = 1; ctx.strokeStyle = '#19ff19'; ctx.stroke();
-      }
-    }
+    ctx.strokeStyle = '#0f6';
+    for(let i=0;i<OM.n;i++){ ctx.beginPath(); ctx.moveTo(c/2,c/2+i*c); ctx.lineTo(omokCanvas.width-c/2,c/2+i*c); ctx.stroke(); ctx.beginPath(); ctx.moveTo(c/2+i*c,c/2); ctx.lineTo(c/2+i*c,omokCanvas.height - c/2); ctx.stroke(); }
+    for(let y=0;y<OM.n;y++) for(let x=0;x<OM.n;x++){ const v=OM.board[y][x]; if(!v) continue; ctx.beginPath(); ctx.fillStyle = v===1?'#000':'#fff'; ctx.arc(c/2 + x*c, c/2 + y*c, c*0.38, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = '#0f6'; ctx.stroke(); }
   }
-
-  // omok canvas click handler
-  if(omokCanvas) {
-    omokCanvas.addEventListener('click', e => {
-      if(!OM.playing) return;
-      const rect = omokCanvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const px = omokCanvas.width / OM.n;
-      const x = Math.floor((e.clientX - rect.left) * dpr / px);
-      const y = Math.floor((e.clientY - rect.top) * dpr / px);
-      if(x<0 || y<0 || x>=OM.n || y>=OM.n) return;
-      const cur = OM.order[OM.turnIndex];
-      if(cur !== nickname) { addSystem('지금은 당신의 턴이 아닙니다.'); return; }
-      if(OM.board[y][x] !== 0) return;
-      const stone = (OM.turnIndex % 2 === 0) ? 1 : 2;
-      OM.board[y][x] = stone;
-      drawOmok();
-      broadcast({ type:'omok', action:'place', x, y, stone, by: nickname });
-      if(checkOmokWin(x,y,stone)){
-        OM.playing = false;
-        addSystem(`${nickname} 님이 오목에서 승리했습니다!`, true);
-        broadcast({ type:'omok', action:'end', winner: nickname });
-        setTimeout(()=> omokReset(), 1200);
-        return;
-      }
-      OM.turnIndex = (OM.turnIndex + 1) % OM.order.length;
-      setOmokStatus();
-    });
-  }
+  omokCanvas.addEventListener('click', e=>{
+    if(!OM.playing) return;
+    const rect = omokCanvas.getBoundingClientRect(); const r = window.devicePixelRatio || 1;
+    const px = omokCanvas.width / OM.n;
+    const x = Math.floor((e.clientX - rect.left) * r / px);
+    const y = Math.floor((e.clientY - rect.top) * r / px);
+    if(x<0||y<0||x>=OM.n||y>=OM.n) return;
+    const cur = OM.order[OM.turnIndex];
+    if(cur !== nickname){ addSystem('지금은 당신의 턴이 아닙니다.'); return; }
+    if(OM.board[y][x] !== 0) return;
+    const stone = (OM.turnIndex % 2 === 0) ? 1 : 2;
+    OM.board[y][x] = stone; drawOmok();
+    broadcast({ type:'omok', action:'place', x, y, stone, by: nickname });
+    if(checkOmokWin(x,y,stone)){ OM.playing=false; addSystem(`${nickname} 님이 승리했습니다!`, true); broadcast({ type:'omok', action:'end', winner: nickname }); setTimeout(()=> omokReset(), 1200); return; }
+    OM.turnIndex = (OM.turnIndex + 1) % OM.order.length; setOmokStatus();
+  });
 
   function handleOmokNetwork(msg){
     if(!msg || !msg.action) return;
-    if(msg.action==='start') startOmokLocal(false);
-    else if(msg.action==='place'){
-      if(OM.board[msg.y][msg.x] === 0) OM.board[msg.y][msg.x] = msg.stone;
-      drawOmok();
-      const idx = OM.order.indexOf(msg.by);
-      if(idx >= 0) OM.turnIndex = (idx + 1) % OM.order.length;
-      setOmokStatus();
-    } else if(msg.action==='end'){
-      OM.playing=false;
-      addSystem(`${msg.winner} 님이 오목에서 승리했습니다!`, true);
-      setTimeout(()=> omokReset(), 1200);
-    } else if(msg.action==='sync' && msg.omok) {
-      importOmok(msg.omok);
-    }
+    if(msg.action === 'start'){ startOmok(false); }
+    else if(msg.action === 'place'){ if(OM.board[msg.y][msg.x]===0) OM.board[msg.y][msg.x]=msg.stone; drawOmok(); const idx = OM.order.indexOf(msg.by); if(idx>=0) OM.turnIndex=(idx+1)%OM.order.length; setOmokStatus(); }
+    else if(msg.action === 'end'){ OM.playing=false; addSystem(`${msg.winner} 님이 승리했습니다!`, true); setTimeout(()=> omokReset(),1200); }
+    else if(msg.action === 'sync' && msg.omok) importOmok(msg.omok);
   }
+  function importOmok(obj){ if(!obj) return; OM.board = obj.board||OM.board; OM.order = obj.order||OM.order; OM.playing = obj.playing||OM.playing; OM.turnIndex = obj.turnIndex||OM.turnIndex; drawOmok(); if(OM.playing){ omokCanvas.style.display='block'; if(omokStatus) omokStatus.style.display='block'; setOmokStatus(); } }
+  function exportOmok(){ return { board: OM.board, order: OM.order, playing: OM.playing, turnIndex: OM.turnIndex }; }
+  function checkOmokWin(x,y,stone){ const dirs=[[1,0],[0,1],[1,1],[1,-1]]; for(const [dx,dy] of dirs){ let c=1; for(let s=1;s<5;s++){ const nx=x+dx*s, ny=y+dy*s; if(nx<0||ny<0||nx>=OM.n||ny>=OM.n) break; if(OM.board[ny][nx]===stone) c++; else break; } for(let s=1;s<5;s++){ const nx=x-dx*s, ny=y-dy*s; if(nx<0||ny<0||nx>=OM.n||ny>=OM.n) break; if(OM.board[ny][nx]===stone) c++; else break; } if(c>=5) return true; } return false; }
 
-  function checkOmokWin(x,y,stone){
-    const dirs = [[1,0],[0,1],[1,1],[1,-1]];
-    for(const [dx,dy] of dirs){
-      let cnt=1;
-      for(let s=1;s<5;s++){ const nx=x+dx*s, ny=y+dy*s; if(nx<0||ny<0||nx>=OM.n||ny>=OM.n) break; if(OM.board[ny][nx]===stone) cnt++; else break; }
-      for(let s=1;s<5;s++){ const nx=x-dx*s, ny=y-dy*s; if(nx<0||ny<0||nx>=OM.n||ny>=OM.n) break; if(OM.board[ny][nx]===stone) cnt++; else break; }
-      if(cnt>=5) return true;
-    }
-    return false;
+  // --- Apply/handle strokes from network (backward-compatible) ---
+  function applyRemoteStroke(pkt){
+    if(!pkt) return;
+    applyStroke(pkt.fromX, pkt.fromY, pkt.toX, pkt.toY, pkt.color || selectedColor, pkt.width || (brushSize * (window.devicePixelRatio||1)));
   }
+  // NOTE: applyRemoteStroke used above by handleIncoming
 
-  function importOmok(obj){ if(!obj) return; OM.board = obj.board || OM.board; OM.order = obj.order || OM.order; OM.playing = obj.playing || OM.playing; OM.turnIndex = obj.turnIndex || OM.turnIndex; drawOmok(); if(OM.playing){ omokCanvas.classList.remove('hidden'); omokStatus && omokStatus.classList.remove('hidden'); setOmokStatus(); } }
-  function exportOmokState(){ return { board: OM.board, order: OM.order, playing: OM.playing, turnIndex: OM.turnIndex }; }
+  // --- sync/import/export helpers ---
+  function exportDrawing(){ try{ return { img: dCanvas.toDataURL() }; }catch(e){ return null; } }
+  function importDrawing(obj){ if(!obj || !obj.img) return; const img=new Image(); img.onload = ()=> { dctx.clearRect(0,0,dCanvas.width,dCanvas.height); dctx.drawImage(img,0,0,dCanvas.width,dCanvas.height); }; img.src = obj.img; }
 
-  // handle omok messages from network
-  function handleOmokMessage(msg){ handleOmokNetwork(msg); }
-
-  // --- misc helpers ---
-  function getNamesList(){ return getNamesList; } // kept for compatibility if needed
-
-  // initial build
+  // initial setup
   buildPalette();
-  resizeDrawCanvas();
-  window.addEventListener('resize', ()=>{ resizeDrawCanvas(); resizeOmokCanvas(); drawOmok(); });
+  resizeDrawingCanvas();
+  resizeOmok();
+  window.addEventListener('resize', ()=>{ resizeDrawingCanvas(); resizeOmok(); drawOmok(); });
 
-  // start Peer
+  // start peer
   startPeer();
 
-  // Expose some functions to console for debugging
+  // debug helper
   window.__p2p = { peer, conns, broadcast };
-};
+
+  // small compatibility aliases
+  function addChat(nm, txt, local=false){ addChat(nm, txt, local); } // noop mapping intentionally left
+
+  // End window.onload
+}; // window.onload
 </script>
+</body>
+</html>
