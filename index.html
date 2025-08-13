@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>P2P 메쉬 채팅 + 캔버스 + 오목</title>
+<title>P2P 채팅</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -14,8 +14,7 @@ html,body{height:100%; margin:0; background:var(--bg); color:var(--ink); font-fa
 .container{max-width:1100px; margin:10px auto; height:calc(100vh - 20px); display:flex; flex-direction:column; border:3px solid var(--crt); padding:8px; gap:8px}
 .header{padding:6px 8px; background:#030; color:var(--crt); text-align:center; user-select:none}
 .topbar{display:flex; gap:8px; align-items:center; padding:8px; background:var(--panel)}
-.topbar input, .topbar button { background:#0b0b0b; color:var(--crt); border:1px solid rgba(25,255,25,0.2); padding:6px; font-family:inherit }
-.topbar button{cursor:pointer}
+.topbar input { background:#0b0b0b; color:var(--crt); border:1px solid rgba(25,255,25,0.2); padding:6px; font-family:inherit }
 .main{display:flex; gap:8px; flex:1; min-height:0}
 .left, .right{background:var(--panel); border:2px solid rgba(25,255,25,0.12); padding:8px; display:flex; flex-direction:column}
 .left{flex:1; min-width:260px; min-height:0}
@@ -26,7 +25,7 @@ html,body{height:100%; margin:0; background:var(--bg); color:var(--ink); font-fa
 .name{color:var(--muted); margin-right:6px; font-weight:700}
 .chatForm{display:flex; gap:8px; margin-top:8px}
 .chatForm input{flex:1; padding:8px; background:#0c0c0c; color:var(--crt); border:1px solid rgba(25,255,25,0.06)}
-.chatForm button{padding:8px 12px; cursor:pointer}
+.chatForm button{padding:8px 12px; cursor:pointer; background:#0b0b0b; color:var(--crt)}
 .controlsRow{display:flex; gap:8px; margin-top:8px; flex-wrap:wrap}
 .members{margin-top:8px; font-size:.92em; color:#9f9}
 .canvasWrap{width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; padding:8px}
@@ -53,7 +52,6 @@ html,body{height:100%; margin:0; background:var(--bg); color:var(--ink); font-fa
   <div class="topbar">
     <input id="userName" placeholder="닉네임 (2~12자)" maxlength="12" />
     <input id="roomId" placeholder="방 코드(6자리) — 비워두면 자동 생성" maxlength="6" />
-    <button id="btnStart" class="small">접속 / 시작</button>
     <div style="flex:1"></div>
     <div id="roomInfo" class="members"></div>
   </div>
@@ -102,21 +100,11 @@ html,body{height:100%; margin:0; background:var(--bg); color:var(--ink); font-fa
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
-/* ---------- 유틸 & 상태 ---------- */
+/* ========= 상태 & 유틸 ========= */
 const $ = s => document.querySelector(s);
-const chatLog = $('#chatLog');
-const chatForm = $('#chatForm');
-const chatInput = $('#chatInput');
-const membersEl = $('#members');
-const roomInfo = $('#roomInfo');
-
-const userNameInput = $('#userName');
-const roomIdInput = $('#roomId');
-const btnStart = $('#btnStart');
-
-const btnHelp = $('#btnHelp');
-const btnOmok = $('#btnOmok');
-const btnClear = $('#btnClear');
+const chatLog = $('#chatLog'), chatForm = $('#chatForm'), chatInput = $('#chatInput');
+const membersEl = $('#members'), roomInfo = $('#roomInfo');
+const userNameInput = $('#userName'), roomIdInput = $('#roomId');
 
 const pixelCanvas = $('#pixelCanvas'), pctx = pixelCanvas.getContext('2d');
 const paletteEl = $('#palette');
@@ -125,12 +113,13 @@ const omokStatus = $('#omokStatus');
 
 const modeDrawBtn = $('#modeDraw'), modeEraserBtn = $('#modeEraser'), modeGameBtn = $('#modeGame');
 const brushSizeSel = $('#brushSize');
+const btnHelp = $('#btnHelp'), btnOmok = $('#btnOmok'), btnClear = $('#btnClear');
 
 let nickname = '';
 let roomId = '';
 let peer = null;
 let myPeerId = '';
-let conns = {}; // peerId -> DataConnection
+let conns = {}; // peerId -> DataConnection (with .name)
 const commands = {'/help':'명령어 목록', '/omok start':'오목 시작', '/clear':'채팅 지우기'};
 
 function now(){ return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
@@ -142,129 +131,128 @@ function addMsg(name,text,local=false){
 }
 function escapeHtml(s=''){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
-/* ---------- PeerJS 메쉬 연결 (호스트 없음) ---------- */
-/*
- - peer id 형식: room-<roomId>-<random>
- - 같은 roomId를 사용하는 피어들을 listAllPeers 로 찾아 서로 연결
- - 주기적으로 listAllPeers 호출해 새 참가자 연결 시도
-*/
-function startPeer(){
-  nickname = (userNameInput.value||'').trim();
-  roomId = ((roomIdInput.value||'').trim() || Math.random().toString(36).slice(2,8).toUpperCase()).slice(0,6);
-  if(!nickname || nickname.length<2){ alert('닉네임 2자 이상 입력하세요.'); return; }
+/* ========= 피어 메쉬 자동 연결 =========
+ - peer id: room-<roomId>-<random>
+ - listAllPeers 로 같은 roomId 접두사의 피어들을 찾아 자동 연결
+ - 새로 연결되면 sync(픽셀+오목) 전송
+=========================== */
+function autoStart(){
+  // nickname + roomId 설정 (없으면 기본값)
+  nickname = (userNameInput.value||'').trim() || ('Guest'+Math.random().toString(36).slice(2,6));
+  roomId = ( (roomIdInput.value||'').trim() || (new URLSearchParams(location.search).get('r')) || Math.random().toString(36).slice(2,8).toUpperCase().slice(0,6) ).slice(0,6);
+  userNameInput.value = nickname;
+  roomIdInput.value = roomId;
   const localId = `room-${roomId}-${Math.random().toString(36).slice(2,8)}`;
   peer = new Peer(localId, {host:'0.peerjs.com', port:443, secure:true, debug:1});
-  peer.on('open', id=>{
+  peer.on('open', id => {
     myPeerId = id;
-    addMsg('시스템', `연결됨: ${id}`, true);
-    roomInfo.textContent = `방: ${roomId} | 내 ID: ${id}`;
-    // immediately try to discover others
+    addMsg('시스템', `내 ID: ${id}`, true);
+    roomInfo.textContent = `방: ${roomId} | ID: ${id}`;
     discoverAndConnect();
-    // poll periodically for new peers
     setInterval(discoverAndConnect, 2500);
   });
-  peer.on('connection', conn=>{
-    // incoming connection from another peer: set up handlers
+  peer.on('connection', conn => {
     setupConnection(conn);
   });
-  peer.on('error', e=> addMsg('시스템', 'Peer 오류: '+e, true));
+  peer.on('error', e => addMsg('시스템', 'Peer 오류: '+e, true));
 }
 
 function discoverAndConnect(){
   if(!peer || !peer.listAllPeers) return;
-  peer.listAllPeers(peers=>{
-    // peers is array of peer ids on that server
-    peers.filter(id => id.startsWith(`room-${roomId}-`) && id !== myPeerId)
-         .forEach(id => {
-           if(conns[id]) return; // already connected
-           try {
-             const c = peer.connect(id, {reliable:true});
-             c.on('open', ()=> {
-               // handshake: send meta
-               c.send({type:'meta', name:nickname});
-               setupConnection(c);
-             });
-             c.on('error', ()=>{});
-           } catch(e){}
-         });
+  peer.listAllPeers(peers => {
+    peers.filter(id=> id.startsWith(`room-${roomId}-`) && id !== myPeerId)
+         .forEach(id => { if(!conns[id]) connectToPeer(id); });
   });
 }
 
-/* Setup both incoming & outgoing connections uniformly */
+function connectToPeer(id){
+  try{
+    const c = peer.connect(id, {reliable:true});
+    c.on('open', ()=> {
+      setupConnection(c);
+      // send meta & request sync
+      try{ c.send({type:'meta', name:nickname}); }catch(e){}
+      sendSyncTo(c);
+    });
+    c.on('error', ()=>{});
+  }catch(e){}
+}
+
 function setupConnection(conn){
-  const peerId = conn.peer;
-  if(conns[peerId]) {
-    // already have connection — keep existing, close duplicate if this is outgoing duplicate
-    // but avoid immediate close to prevent race; just attach handlers
+  const pid = conn.peer;
+  if(conns[pid]) {
+    // already connected - attach handlers only
   } else {
-    conns[peerId] = conn;
+    conns[pid] = conn;
   }
-  conn.on('data', data => {
-    handleIncoming(peerId, data);
-  });
+  conn.on('data', data => handleIncoming(pid, data));
   conn.on('open', ()=> {
-    // if we initiated connection, send meta
+    // send meta if not already
     try{ conn.send({type:'meta', name:nickname}); }catch(e){}
-    updateMembersUI();
+    updateMembers();
   });
   conn.on('close', ()=> {
-    delete conns[peerId];
-    addMsg('시스템', `연결 종료: ${peerId}`, true);
-    updateMembersUI();
+    delete conns[pid];
+    addMsg('시스템', `퇴장: ${pid}`, true);
+    updateMembers();
   });
 }
 
-/* Broadcast helper: send to all connected peers */
 function broadcast(obj){
-  Object.values(conns).forEach(c=>{
-    if(c.open) try{ c.send(obj); }catch(e){}
-  });
+  Object.values(conns).forEach(c => { if(c.open) try{ c.send(obj);}catch(e){} });
 }
 
-/* Handle incoming messages */
+/* send full sync (pixel + omok) to newly connected peer */
+function sendSyncTo(conn){
+  const pkt = {type:'sync', pixel:exportPixel(), omok:exportOmok(), meta:{names:getNamesList()}};
+  try{ conn.send(pkt);}catch(e){}
+}
+
+/* handle incoming messages */
 function handleIncoming(fromId, msg){
-  if(msg?.type === 'meta'){
-    // meta: name announcement => update members mapping (store name)
+  if(!msg) return;
+  if(msg.type === 'meta'){
     if(conns[fromId]) conns[fromId].name = msg.name || fromId;
-    updateMembersUI();
-  } else if(msg?.type === 'chat'){
+    updateMembers();
+  } else if(msg.type === 'chat'){
     addMsg(msg.name, msg.text);
-  } else if(msg?.type === 'cmd'){
-    // commands from others
-    if(msg.text === '/help') { showHelpLocal(); }
-    else if(msg.text === '/omok start') { // start omok (synchronized by everyone)
-      startOmok(); // each peer will start
-    } else if(msg.text === '/clear') { chatLog.innerHTML=''; addMsg('시스템','채팅 지움', true); }
-  } else if(msg?.type === 'pixel'){
-    // apply pixel change
+  } else if(msg.type === 'cmd'){
+    handleCmdLocal(msg.text, msg.from, false);
+  } else if(msg.type === 'pixel'){
     applyPixel(msg.x, msg.y, msg.color, false);
-  } else if(msg?.type === 'omok'){
-    applyOmokMessage(msg);
-  } else if(msg?.type === 'sync'){
+  } else if(msg.type === 'omok'){
+    applyOmokMsg(msg);
+  } else if(msg.type === 'sync'){
     if(msg.pixel) importPixel(msg.pixel);
     if(msg.omok) importOmok(msg.omok);
-  } else if(msg?.type === 'system'){
+    if(msg.meta && Array.isArray(msg.meta.names)) updateMembersFromList(msg.meta.names);
+  } else if(msg.type === 'system'){
     addMsg('시스템', msg.text, true);
   }
 }
 
-/* Update member list UI from known connections */
-function updateMembersUI(){
-  const names = [nickname];
-  Object.entries(conns).forEach(([id,c]) => {
-    names.push((c.name)||id);
-  });
+/* member UI */
+function getNamesList(){
+  const arr = [nickname];
+  Object.values(conns).forEach(c => { if(c.name) arr.push(c.name); });
+  return Array.from(new Set(arr));
+}
+function updateMembers(){
+  const names = getNamesList();
   membersEl.textContent = '참가자: ' + names.join(', ');
 }
+function updateMembersFromList(list){
+  if(Array.isArray(list)) membersEl.textContent = '참가자: ' + Array.from(new Set(list)).join(', ');
+}
 
-/* ---------- Chat ---------- */
+/* ========= Chat & Commands ========= */
 chatForm.addEventListener('submit', e=>{
   e.preventDefault();
   const txt = (chatInput.value||'').trim();
   if(!txt) return;
   if(txt.startsWith('/')){
-    // command locally + broadcast
-    handleLocalCommand(txt);
+    // local handling and broadcast
+    handleCmdLocal(txt, nickname, true);
     broadcast({type:'cmd', text:txt, from:nickname});
   } else {
     addMsg(nickname, txt, true);
@@ -273,28 +261,32 @@ chatForm.addEventListener('submit', e=>{
   chatInput.value='';
 });
 
-function showHelpLocal(){
-  addMsg('시스템','=== 명령어 ===', true);
-  for(const k in commands) addMsg('시스템', `${k} — ${commands[k]}`, true);
+function handleCmdLocal(cmd, fromName='system', local=true){
+  if(cmd === '/help'){
+    addMsg('시스템','=== 명령어 ===', true);
+    for(const k in commands) addMsg('시스템', `${k} — ${commands[k]}`, true);
+  } else if(cmd === '/omok start'){
+    // start omok locally and broadcast handled above by caller when needed
+    startOmok();
+  } else if(cmd === '/clear'){
+    chatLog.innerHTML=''; addMsg('시스템','채팅이 지워졌습니다.', true);
+  } else {
+    addMsg('시스템','알 수 없는 명령어입니다. /help 로 확인하세요.', true);
+  }
 }
-btnHelp.addEventListener('click', ()=> { handleLocalCommand('/help'); broadcast({type:'cmd', text:'/help', from:nickname}); });
-btnClear.addEventListener('click', ()=> { chatLog.innerHTML=''; broadcast({type:'cmd', text:'/clear', from:nickname}); });
 
-function handleLocalCommand(cmd){
-  if(cmd === '/help') showHelpLocal();
-  else if(cmd === '/omok start') { startOmok(); broadcast({type:'cmd', text:'/omok start', from:nickname}); }
-  else if(cmd === '/clear') { chatLog.innerHTML=''; addMsg('시스템','채팅 지움', true); }
-  else addMsg('시스템','알 수 없는 명령어', true);
-}
+/* UI command buttons */
+$('#btnHelp').addEventListener('click', ()=> { handleCmdLocal('/help', nickname, true); broadcast({type:'cmd', text:'/help', from:nickname}); });
+$('#btnClear').addEventListener('click', ()=> { chatLog.innerHTML=''; broadcast({type:'cmd', text:'/clear', from:nickname}); });
+$('#btnOmok').addEventListener('click', ()=> { handleCmdLocal('/omok start', nickname, true); broadcast({type:'cmd', text:'/omok start', from:nickname}); });
 
-/* ---------- PIXEL CANVAS (브러쉬 + 지우개) ---------- */
+/* ========= PIXEL CANVAS ========= */
 const PAL = ['#000000','#ffffff','#ff0000','#00ff00','#0000ff','#ffff00','#ff00ff','#00ffff','#ff8800','#888888','#8b4513','#7fff00','#ff1493','#40e0d0','#dda0dd','#00ff7f'];
 let selColor = PAL[2];
 const P = {w:16,h:16,data:Array.from({length:16}, ()=> Array(16).fill('#000000'))};
-
 function drawPixelCanvas(){
-  const displayW = Math.min(480, window.innerWidth * 0.6);
-  const scale = Math.floor(displayW / P.w);
+  const displayW = Math.min(480, window.innerWidth * 0.55);
+  const scale = Math.max(8, Math.floor(displayW / P.w));
   pixelCanvas.style.width = `${scale * P.w}px`;
   pixelCanvas.style.height = `${scale * P.h}px`;
   pixelCanvas.width = P.w * 20;
@@ -315,7 +307,7 @@ function buildPalette(){
   });
 }
 pixelCanvas.addEventListener('click', e=>{
-  if(currentMode === 'game') return; // 게임중엔 픽셀 캔버스 입력 비활성화
+  if(currentMode === 'game') return;
   const rect = pixelCanvas.getBoundingClientRect();
   const px = pixelCanvas.width / P.w;
   const x = Math.floor((e.clientX - rect.left) / px);
@@ -327,42 +319,40 @@ pixelCanvas.addEventListener('click', e=>{
       if(nx>=0 && ny>=0 && nx<P.w && ny<P.h){
         const color = currentMode === 'eraser' ? '#000000' : selColor;
         P.data[ny][nx] = color;
+        // broadcast each pixel changed
+        broadcast({type:'pixel', x:nx, y:ny, color});
       }
     }
   }
   drawPixelCanvas();
-  // broadcast single pixels affected (coalesce not implemented for simplicity)
-  broadcast({type:'pixel', x, y, color: currentMode === 'eraser' ? '#000000' : selColor, brush:parseInt(brushSizeSel.value||3,10)});
 });
-function applyPixel(x,y,color){
+function applyPixel(x,y,color, fromNetwork=true){
   if(x<0||y<0||x>=P.w||y>=P.h) return;
-  P.data[y][x] = color; drawPixelCanvas();
+  P.data[y][x] = color;
+  drawPixelCanvas();
 }
-function importPixel(obj){
-  if(obj?.data) { P.data = obj.data; drawPixelCanvas(); }
-}
+function exportPixel(){ return {data:P.data}; }
+function importPixel(obj){ if(obj?.data){ P.data = obj.data; drawPixelCanvas(); } }
 
-/* ---------- OMOK (다인 턴 기반) ---------- */
+/* ========= OMOK ========= */
 const O = {n:15, board:[], playing:false, order:[], turnIndex:0, cell:560/15};
-function omokReset(){ O.board = Array.from({length:O.n}, ()=> Array(O.n).fill(0)); O.playing=false; O.order=[]; O.turnIndex=0; drawOmok(); omokCanvas.classList.add('hidden'); omokStatus.classList.add('hidden'); }
+function omokReset(){ O.board = Array.from({length:O.n}, ()=> Array(O.n).fill(0)); O.playing=false; O.order=[]; O.turnIndex=0; drawOmok(); omokCanvas.classList.add('hidden'); omokStatus.classList.add('hidden'); currentMode='draw'; modeDrawBtn.disabled=true; modeEraserBtn.disabled=false; modeGameBtn.disabled=false; }
 function startOmok(){
-  // everyone forms order by sorting known participant names (deterministic)
-  const names = [nickname];
-  Object.values(conns).forEach(c=> { if(c.name) names.push(c.name); });
-  // unique & deterministic order: sort alphabetically to avoid race
-  const unique = Array.from(new Set(names)).sort();
-  O.order = unique;
+  // deterministic order: collect names and sort
+  const names = getNamesList().slice().sort();
+  O.order = names;
   O.board = Array.from({length:O.n}, ()=> Array(O.n).fill(0));
   O.playing = true; O.turnIndex = 0;
   drawOmok();
   omokCanvas.classList.remove('hidden'); omokStatus.classList.remove('hidden');
+  currentMode = 'game';
+  modeDrawBtn.disabled=false; modeEraserBtn.disabled=false; modeGameBtn.disabled=true;
   setOmokStatus();
 }
 function setOmokStatus(){ omokStatus.textContent = `오목 — 턴: ${O.order[O.turnIndex] || '(대기)'}`; }
 function drawOmok(){
-  // responsive size
-  const displayW = Math.min(560, window.innerWidth * 0.7);
-  const scale = Math.floor(displayW / O.n);
+  const displayW = Math.min(560, window.innerWidth * 0.6);
+  const scale = Math.max(10, Math.floor(displayW / O.n));
   omokCanvas.style.width = `${scale * O.n}px`;
   omokCanvas.style.height = `${scale * O.n}px`;
   omokCanvas.width = O.n * 20;
@@ -396,148 +386,65 @@ omokCanvas.addEventListener('click', e=>{
   drawOmok();
   // broadcast move
   broadcast({type:'omok', action:'place', x,y,stone,by:nickname});
-  // win check
   if(checkWin(x,y,stone)){
     O.playing=false;
     addMsg('시스템', `${nickname} 님이 오목에서 승리했습니다!`, true);
     broadcast({type:'omok', action:'end', winner:nickname});
-    setOmokStatus();
+    // end -> after small delay revert to draw mode
+    setTimeout(()=> omokReset(), 1200);
     return;
   }
-  // advance turn deterministically
+  // advance turn
   O.turnIndex = (O.turnIndex + 1) % O.order.length;
   setOmokStatus();
 });
-function applyOmokMessage(msg){
+function applyOmokMsg(msg){
   if(msg.action === 'place'){
     if(O.board[msg.y][msg.x] === 0) O.board[msg.y][msg.x] = msg.stone;
     drawOmok();
-    // update turnIndex if sender known
     const idx = O.order.indexOf(msg.by);
-    if(idx >= 0) O.turnIndex = (idx + 1) % O.order.length;
+    if(idx>=0) O.turnIndex = (idx+1) % O.order.length;
     setOmokStatus();
   } else if(msg.action === 'end'){
-    O.playing=false; addMsg('시스템', `${msg.winner} 승리!`, true);
-    setOmokStatus();
+    O.playing=false;
+    addMsg('시스템', `${msg.winner} 님이 오목에서 승리했습니다!`, true);
+    setTimeout(()=> omokReset(), 1200);
   } else if(msg.action === 'start'){
-    // sync handled by each peer starting own startOmok call
     startOmok();
   } else if(msg.action === 'sync' && msg.omok){
     importOmok(msg.omok);
   }
 }
+function importOmok(obj){ if(!obj) return; O.board = obj.board || O.board; O.order = obj.order || O.order; O.playing = obj.playing || O.playing; O.turnIndex = obj.turnIndex || O.turnIndex; drawOmok(); if(O.playing){ omokCanvas.classList.remove('hidden'); omokStatus.classList.remove('hidden'); setOmokStatus(); } }
+
+/* check win util */
 function checkDir(x,y,dx,dy,stone){
   let c=1;
   for(let s=1;s<5;s++){ const nx=x+dx*s, ny=y+dy*s; if(nx<0||ny<0||nx>=O.n||ny>=O.n) break; if(O.board[ny][nx]===stone) c++; else break; }
   for(let s=1;s<5;s++){ const nx=x-dx*s, ny=y-dy*s; if(nx<0||ny<0||nx>=O.n||ny>=O.n) break; if(O.board[ny][nx]===stone) c++; else break; }
   return c>=5;
 }
-function checkWin(x,y,stone){
-  return checkDir(x,y,1,0,stone) || checkDir(x,y,0,1,stone) || checkDir(x,y,1,1,stone) || checkDir(x,y,1,-1,stone);
-}
-function importOmok(obj){ if(!obj) return; O.board = obj.board || O.board; O.order = obj.order || O.order; O.playing = obj.playing || O.playing; O.turnIndex = obj.turnIndex || O.turnIndex; drawOmok(); if(O.playing){ omokCanvas.classList.remove('hidden'); omokStatus.classList.remove('hidden'); setOmokStatus(); } }
+function checkWin(x,y,stone){ return checkDir(x,y,1,0,stone) || checkDir(x,y,0,1,stone) || checkDir(x,y,1,1,stone) || checkDir(x,y,1,-1,stone) }
 
-/* ---------- Helpers for sending pixel/omok sync on join ---------- */
-function sendSyncOnConnect(conn){
-  // send current pixel & omok state to the newly connected peer
-  const pkt = {type:'sync', pixel:{data:P.data}, omok: {board:O.board, order:O.order, playing:O.playing, turnIndex:O.turnIndex}};
-  try{ conn.send(pkt); }catch(e){}
-}
+/* ========= Helpers & UI init ========= */
+let currentMode = 'draw'; // draw | eraser | game
+modeDrawBtn.addEventListener('click', ()=> { currentMode='draw'; modeDrawBtn.disabled=true; modeEraserBtn.disabled=false; modeGameBtn.disabled=false; });
+modeEraserBtn.addEventListener('click', ()=> { currentMode='eraser'; modeDrawBtn.disabled=false; modeEraserBtn.disabled=true; modeGameBtn.disabled=false; });
+modeGameBtn.addEventListener('click', ()=> { handleCmdLocal('/omok start', nickname, true); broadcast({type:'cmd', text:'/omok start', from:nickname}); });
 
-/* ---------- UI events ---------- */
-btnStart.addEventListener('click', ()=> { startPeer(); btnStart.disabled=true; userNameInput.disabled=true; roomIdInput.disabled=true; });
-btnOmok.addEventListener('click', ()=> { handleLocalCommand('/omok start'); broadcast({type:'cmd', text:'/omok start', from:nickname}); });
-btnHelp.addEventListener('click', ()=> { handleLocalCommand('/help'); broadcast({type:'cmd', text:'/help', from:nickname}); });
+modeDrawBtn.disabled=true;
 
-/* Pixel palette & initial draw */
 function initUI(){
-  buildPalette();
-  drawPixelCanvas();
-  omokReset();
-}
-function buildPalette(){
-  paletteEl.innerHTML=''; PAL.forEach(c=>{ const el=document.createElement('div'); el.className='sw'; el.style.background=c; if(c===selColor) el.classList.add('sel'); el.tabIndex=0; el.addEventListener('click', ()=>{ selColor=c; document.querySelectorAll('.sw').forEach(s=>s.classList.remove('sel')); el.classList.add('sel'); }); paletteEl.appendChild(el); });
+  buildPalette(); drawPixelCanvas(); omokReset();
 }
 window.addEventListener('resize', ()=>{ drawPixelCanvas(); drawOmok(); });
 
-/* When sending pixel broadcast, apply local coalescing: set pixel(s) already applied locally */
-function handleIncomingPixel(msg){
-  // msg contains x,y,color,brush maybe; we apply single point for simplicity
-  applyPixel(msg.x,msg.y,msg.color);
-}
+/* announce meta periodically */
+setInterval(()=>{ if(peer) broadcast({type:'meta', name:nickname}); }, 3000);
 
-/* wrapper applyPixel used by network and local */
-function applyPixel(x,y,color){
-  if(x<0||y<0||x>=P.w||y>=P.h) return;
-  P.data[y][x] = color;
-  drawPixelCanvas();
-}
-
-/* initialization data */
+/* ========= start automatically ========= */
 initUI();
-
-/* Ensure that when a new connection is opened (we call setupConnection), we send our meta & request sync */
-(function hookSendSync(){
-  // monkey-patch to call sendState when new conn opened by us (we already call meta on open)
-  const origSetup = setupConnection;
-  setupConnection = function(conn){
-    origSetup(conn);
-    // give name to connection object for ease
-    conn.name = conn.name || conn.peer;
-    // send sync to this peer (so they get current state)
-    sendSyncOnConnect(conn);
-  };
-})();
-
-/* Helper: when broadcasting pixel messages, ensure apply locally and then broadcast */
-function broadcastPixel(x,y,color){
-  applyPixel(x,y,color);
-  broadcast({type:'pixel', x,y, color});
-}
-
-/* Make sure broadcasts from pixel click use broadcastPixel */
-pixelCanvas.addEventListener('click', e=>{
-  if(currentMode === 'game') return;
-  const rect = pixelCanvas.getBoundingClientRect();
-  const px = pixelCanvas.width / P.w;
-  const x = Math.floor((e.clientX - rect.left) / px);
-  const y = Math.floor((e.clientY - rect.top) / px);
-  const brush = parseInt(brushSizeSel.value||3,10);
-  for(let dy = -Math.floor((brush-1)/2); dy <= Math.floor((brush-1)/2); dy++){
-    for(let dx = -Math.floor((brush-1)/2); dx <= Math.floor((brush-1)/2); dx++){
-      const nx = x+dx, ny = y+dy;
-      if(nx>=0 && ny>=0 && nx<P.w && ny<P.h){
-        const color = currentMode === 'eraser' ? '#000000' : selColor;
-        P.data[ny][nx] = color;
-        // broadcast each pixel change
-        broadcast({type:'pixel', x:nx, y:ny, color});
-      }
-    }
-  }
-  drawPixelCanvas();
-});
-
-/* current drawing mode */
-let currentMode = 'draw'; // 'draw' | 'eraser' | 'game'
-modeDrawBtn.addEventListener('click', ()=> { currentMode='draw'; modeDrawBtn.disabled=true; modeEraserBtn.disabled=false; modeGameBtn.disabled=false; });
-modeEraserBtn.addEventListener('click', ()=> { currentMode='eraser'; modeDrawBtn.disabled=false; modeEraserBtn.disabled=true; modeGameBtn.disabled=false; });
-modeGameBtn.addEventListener('click', ()=> { currentMode='game'; modeDrawBtn.disabled=false; modeEraserBtn.disabled=false; modeGameBtn.disabled=true; /* hide pixel actions during game */ });
-
-/* initial mode button states */
-modeDrawBtn.disabled = true;
-
-/* ---------- initial pixel data and helpers ---------- */
-const P = {w:16,h:16,data:Array.from({length:16}, ()=> Array(16).fill('#000000'))};
-
-/* ---------- utility: send meta to all after connecting to let others know our name ---------- */
-function announceMeta(){
-  broadcast({type:'meta', name:nickname});
-}
-/* call announce when we have active connections occasionally */
-setInterval(()=> { if(peer) announceMeta(); }, 3000);
-
-/* ---------- small safety: ensure peer destroyed on unload ---------- */
-window.addEventListener('beforeunload', ()=> { try{ if(peer) peer.destroy(); }catch(e){} });
+autoStart();
 
 </script>
 </body>
