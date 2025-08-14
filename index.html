@@ -1,4 +1,4 @@
-<!-- index.html (원본 UI 유지, 내부 네트워크 스택만 교체) -->
+<!-- index.html — 원본 UI 유지 + 요청 수정 적용 -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -7,37 +7,47 @@
 <title>P2P 채팅</title>
 <style>
 /* 원본 스타일 유지 */
-:root{--bg:#0b0f0c;--panel:#111;--line:#0f0;--txt:#cfc;--muted:#8a8;}
-*{box-sizing:border-box;}
-body{margin:0;background:#000;color:var(--txt);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
-.wrap{max-width:1280px;margin:10px auto;border:3px solid #0f0;box-shadow:0 0 0 4px #063 inset;padding:6px;}
-.header{border:2px solid #0f0;margin:6px;padding:8px;text-align:center;font-weight:700;background:#010;}
-.topRow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px;}
+:root{--bg:#0b0f0c;--panel:#111;--line:#0f0;--txt:#cfc;--muted:#8a8}
+*{box-sizing:border-box}
+html,body{height:100%} /* 변경됨: 전체 높이 채움 */
+body{margin:0;background:#000;color:var(--txt);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.wrap{max-width:1280px;margin:10px auto;border:3px solid #0f0;box-shadow:0 0 0 4px #063 inset;padding:6px;min-height:calc(100% - 20px)} /* 변경됨 */
+.header{border:2px solid #0f0;margin:6px;padding:8px;text-align:center;font-weight:700;background:#010}
+.topRow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px}
 .topRow input{background:#000;border:2px solid #0f0;color:#9f9;padding:6px 8px;border-radius:4px;min-width:120px}
 .topRow .room{margin-left:auto;color:#9f9}
-.main{display:grid;grid-template-columns:1fr 1fr;gap:10px;border-top:2px solid #060;border-bottom:2px solid #060;padding:8px;}
-.left,.right{border:2px solid #0f0;background:#010;min-height:560px;display:flex;flex-direction:column;}
+
+/* 원본 2열 레이아웃 */
+.main{display:grid;grid-template-columns:1fr 1fr;gap:10px;border-top:2px solid #060;border-bottom:2px solid #060;padding:8px;min-height:68vh} /* 변경됨 */
+.left,.right{border:2px solid #0f0;background:#010;min-height:560px;display:flex;flex-direction:column}
 .left .log{flex:1;overflow:auto;padding:8px;border-bottom:2px solid #060}
-.msg{line-height:1.4}
-.msg .ts{color:#8f8;margin-right:6px}
-.msg .name{color:#0f8;margin-right:6px}
+.msg{line-height:1.4}.msg .ts{color:#8f8;margin-right:6px}.msg .name{color:#0f8;margin-right:6px}
 .controls{display:flex;gap:6px;padding:8px}
 .controls input[type=text]{flex:1;background:#000;border:2px solid #0f0;color:#9f9;padding:8px;border-radius:4px}
 .controls button{background:#000;border:2px solid #0f0;color:#9f9;padding:8px 10px;border-radius:4px;cursor:pointer}
 .controls button:hover{filter:brightness(1.1)}
 .members{padding:6px 8px;border-top:2px solid #060;font-size:14px;color:#9f9}
+
+/* 오른쪽 영역 */
 .right .toolbar{display:flex;gap:8px;padding:8px;border-bottom:2px solid #060;align-items:center;flex-wrap:wrap}
 .right .canvasWrap{position:relative;flex:1;display:flex;flex-direction:column;padding:8px;gap:8px}
-#pixelCanvas{width:100%;height:100%;background:#000;border:2px solid #0f0}
-#omokCanvas{width:100%;height:100%;background:transparent;border:2px solid #0f0;display:block}
+#pixelCanvas{width:100%;height:100%;background:#000;border:2px solid #0f0;touch-action:none} /* 변경됨: touch-action */
 .grid{position:absolute;inset:8px;background:
   linear-gradient(#003a00 1px,transparent 1px) 0 0/20px 20px,
-  linear-gradient(90deg,#003a00 1px,transparent 1px) 0 0/20px 20px;}
+  linear-gradient(90deg,#003a00 1px,transparent 1px) 0 0/20px 20px}
 .palette{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:6px}
-.palette .sw{width:20px;height:20px;border:2px solid #0f0;cursor:pointer}
+.palette .sw{width:22px;height:22px;border:2px solid #0f0;cursor:pointer} /* 변경됨: 더 크고 터치 친화적 */
 .palette .sw.sel{outline:3px solid #0f0}
+
+/* 변경됨: 가로/세로 자동 맞춤 */
+@media (max-aspect-ratio: 9/10), (max-width: 900px){
+  .main{grid-template-columns:1fr;min-height:auto}
+  .left,.right{min-height:380px}
+}
+
+/* 변경됨: 버튼 시각 정돈 */
+button:disabled{opacity:.6}
 .footer{margin-top:8px;padding:6px;border:2px solid #0f0;text-align:center;color:#8f8}
-@media (max-width:900px){.main{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -46,8 +56,8 @@ body{margin:0;background:#000;color:var(--txt);font-family:ui-monospace,SFMono-R
 
   <div class="topRow">
     <input id="userName" placeholder="닉네임" value="Guest" />
-    <input id="roomId" placeholder="방 ID" value="" />
-    <div class="room" id="roomInfo">방: - | ID: -</div>
+    <input id="roomId" placeholder="방 ID" value="mainroom" readonly /> <!-- 변경됨: 단일 방, 읽기전용 -->
+    <div class="room" id="roomInfo">방: mainroom | ID: -</div>
   </div>
 
   <div class="main">
@@ -70,385 +80,291 @@ body{margin:0;background:#000;color:var(--txt);font-family:ui-monospace,SFMono-R
         <button id="modeDraw">그리기</button>
         <button id="modeEraser">지우개</button>
         <button id="modeGame">오목 모드</button>
-        <label>브러쉬 크기: <input id="brushSize" type="range" min="1" max="6" value="2"></label>
+        <label>브러쉬 크기: <input id="brushSize" type="range" min="1" max="10" value="2"></label> <!-- 변경됨: 범위 확장 -->
       </div>
       <div class="canvasWrap">
         <div class="grid" aria-hidden="true"></div>
-        <canvas id="pixelCanvas" width="560" height="560" aria-label="그림판"></canvas>
-        <canvas id="omokCanvas" width="560" height="560" aria-label="오목판"></canvas>
+        <canvas id="pixelCanvas" width="560" height="560" aria-label="그림·오목 캔버스"></canvas>
+        <!-- 변경됨: omokCanvas 제거 — 단일 캔버스만 사용 -->
         <div class="palette" id="palette"></div>
       </div>
     </div>
   </div>
 
-  <div class="footer">시그널링: <!-- 변경됨 -->WebTorrent Trackers (HTTPS/WSS); 모든 데이터는 참가자 브라우저 간 전송됩니다.</div>
+  <div class="footer">시그널링: WebTorrent Trackers (HTTPS/WSS); 모든 데이터는 브라우저 간 전송됩니다.</div>
 </div>
 
-<!-- 변경됨: PeerJS 제거, P2PT 사용 -->
+<!-- 변경됨: PeerJS 제거, P2PT 사용(트래커 보강) -->
 <script src="https://unpkg.com/p2pt@latest/dist/p2pt.umd.min.js"></script>
 <script>
-/*
-  원본 UI 그대로 사용. 변경된 부분엔 "// 변경됨:" 주석.
-  DOM IDs: userName, roomId, chatLog, chatForm, chatInput, btnHelp, btnOmok, btnClear,
-           modeDraw, modeEraser, modeGame, brushSize, pixelCanvas, omokCanvas, palette, members, roomInfo
-*/
-  // --- DOM references ---
-  const userNameInput = document.getElementById('userName');
-  const roomIdInput   = document.getElementById('roomId');
-  const chatLog       = document.getElementById('chatLog');
-  const chatForm      = document.getElementById('chatForm');
-  const chatInput     = document.getElementById('chatInput');
-  const btnHelp       = document.getElementById('btnHelp');
-  const btnOmok       = document.getElementById('btnOmok');
-  const btnClear      = document.getElementById('btnClear');
-  const membersEl     = document.getElementById('members');
-  const roomInfo      = document.getElementById('roomInfo');
+/* ======== 공통 DOM ======== */
+const userNameInput = document.getElementById('userName');
+const roomIdInput   = document.getElementById('roomId');
+const chatLog       = document.getElementById('chatLog');
+const chatForm      = document.getElementById('chatForm');
+const chatInput     = document.getElementById('chatInput');
+const btnHelp       = document.getElementById('btnHelp');
+const btnOmok       = document.getElementById('btnOmok');
+const btnClear      = document.getElementById('btnClear');
+const membersEl     = document.getElementById('members');
+const roomInfo      = document.getElementById('roomInfo');
 
-  const modeDrawBtn   = document.getElementById('modeDraw');
-  const modeEraserBtn = document.getElementById('modeEraser');
-  const modeGameBtn   = document.getElementById('modeGame');
-  const brushSizeInput= document.getElementById('brushSize');
-  const pixelCanvas   = document.getElementById('pixelCanvas');
-  const omokCanvas    = document.getElementById('omokCanvas');
-  const paletteEl     = document.getElementById('palette');
+const modeDrawBtn   = document.getElementById('modeDraw');
+const modeEraserBtn = document.getElementById('modeEraser');
+const modeGameBtn   = document.getElementById('modeGame');
+const brushSizeInput= document.getElementById('brushSize');
+const canvas        = document.getElementById('pixelCanvas');  // 변경됨: 단일 캔버스
+const ctx           = canvas.getContext('2d');
+const paletteEl     = document.getElementById('palette');
 
-  function $(id){return document.getElementById(id);}
-  function escapeHtml(s=''){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function escapeHtml(s=''){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+const now = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+function addSystem(text, local=false){
+  const d=document.createElement('div'); d.className='msg';
+  d.innerHTML = `<span class="ts">[${now()}]</span> <span class="name">시스템</span> ${escapeHtml(text)}`;
+  if(local) d.style.color='#8f8'; chatLog.appendChild(d); chatLog.scrollTop=chatLog.scrollHeight;
+}
+function addChat(name, text, local=false){
+  const d=document.createElement('div'); d.className='msg';
+  d.innerHTML = `<span class="ts">[${now()}]</span> <span class="name">${escapeHtml(name)}</span> ${escapeHtml(text)}`;
+  if(local) d.style.color='#8f8'; chatLog.appendChild(d); chatLog.scrollTop=chatLog.scrollHeight;
+}
 
-  // --- P2P 설정 ---
-  // 변경됨: PeerJS 옵션 제거, WebRTC P2PT 트래커 사용
-  const TRACKERS = [
-    'wss://tracker.openwebtorrent.com',
-    'wss://tracker.fastcast.nz',
-    'wss://tracker.webtorrent.dev'
-  ];
-  const ROOM_TOPIC = 'p2pchat-mainroom'; // 단일 방
+/* ======== P2P (P2PT) ======== */
+const TRACKERS = [ // 변경됨: 트래커 보강
+  'wss://tracker.openwebtorrent.com',
+  'wss://tracker.btorrent.xyz',
+  'wss://tracker.fastcast.nz',
+  'wss://tracker.webtorrent.dev',
+  'wss://tracker.files.fm:7073/announce'
+];
+const ROOM_TOPIC = 'p2pchat-mainroom'; // 단일 방 고정
 
-  // 상태
-  let nickname = (userNameInput.value||'').trim() || 'Guest';
-  userNameInput.addEventListener('change', ()=>{ nickname=(userNameInput.value||'').trim()||'Guest'; updateMembers(); });
+let nickname = (userNameInput.value||'').trim()||'Guest';
+userNameInput.addEventListener('change', ()=>{ nickname=(userNameInput.value||'').trim()||'Guest'; updateMembers(); });
 
-  // 변경됨: 단일 방 고정
-  let roomId = 'mainroom';
-  roomIdInput.value = 'mainroom';
-  roomIdInput.readOnly = true; roomIdInput.style.opacity = 0.7;
+const conns = {}; // { peerId: {peer, name} }
+let p2pt=null;
 
-  const conns = {}; // { peerId: {peer, name} }
-
-  const now = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  function addSystem(text, local=false){
-    const d = document.createElement('div'); d.className='msg';
-    d.innerHTML = `<span class="ts">[${now()}]</span> <span class="name">시스템</span> ${text}`;
-    if(local) d.style.color = '#8f8';
-    chatLog.appendChild(d); chatLog.scrollTop = chatLog.scrollHeight;
-  }
-  function addChat(name, text, local=false){
-    const d = document.createElement('div'); d.className='msg';
-    d.innerHTML = `<span class="ts">[${now()}]</span> <span class="name">${escapeHtml(name)}</span> ${escapeHtml(text)}`;
-    if(local) d.style.color = '#8f8';
-    chatLog.appendChild(d); chatLog.scrollTop = chatLog.scrollHeight;
-  }
-
-  // ---- P2PT 시작 (호스트/방장 개념 없음) ----
-  function startPeer(){
-    try{
-      window.p2pt = new P2PT(TRACKERS, ROOM_TOPIC);
-      p2pt.on('peerconnect', (peer) => {
-        conns[peer.id] = { peer, name: null };
-        updateMembers();
-        roomInfo.textContent = `방: mainroom | ID: ${p2pt.peerId.slice(0,8)}`;
-        // handshake
-        p2pt.send(peer, { type:'meta', name: nickname });
-        p2pt.send(peer, { type:'sync-request', from: p2pt.peerId });
-      });
-      p2pt.on('peerclose', (peer) => {
-        delete conns[peer.id];
-        updateMembers();
-      });
-      p2pt.on('msg', (peer, msg) => {
-        handleIncoming(peer.id, msg);
-      });
-      p2pt.start();
-      addSystem('P2P 연결 준비 완료', true);
-    }catch(e){
-      addSystem('P2P 초기화 실패: '+e, true);
-      console.error(e);
-    }
-  }
-
-  // 변경됨: PeerJS 탐색/수동 연결 불필요
-  function discoverPeers(){ /* no-op */ }
-  function connectToPeer(id){ /* no-op */ }
-  function acceptConn(conn){ /* no-op */ }
-
-  // 변경됨: P2PT 전송 래퍼/브로드캐스트
-  function safeSend(target, payload){
-    try{
-      if(target && target.peer){ p2pt.send(target.peer, payload); }
-      else if(typeof target === 'string' && conns[target] && conns[target].peer){ p2pt.send(conns[target].peer, payload); }
-    }catch(e){}
-  }
-  function broadcast(payload){
-    try{ if(window.p2pt) p2pt.broadcast(payload); }catch(e){}
-  }
-
-  function updateMembers(){
-    const names = [nickname];
-    Object.values(conns).forEach(c => { if(c.name) names.push(c.name); });
-    membersEl.textContent = '참가자: ' + Array.from(new Set(names)).join(', ');
-  }
-  function getNamesList(){ const arr=[nickname]; Object.values(conns).forEach(c=>{ if(c.name) arr.push(c.name); }); return Array.from(new Set(arr)); }
-
-  // --- 수신 처리 ---
-  function handleIncoming(fromId, msg){
-    if(!msg || !msg.type) return;
-    switch(msg.type){
-      case 'meta':
-        if(conns[fromId]) conns[fromId].name = msg.name || fromId;
-        updateMembers(); break;
-      case 'chat':
-        addChat(msg.name||fromId, msg.text||''); break;
-      case 'cmd':
-        if(msg.text === '/help') showHelp();
-        if(msg.text === '/omok start') startOmok(false);
-        if(msg.text === '/clear') { chatLog.innerHTML=''; addSystem('채팅 초기화', true); }
-        break;
-      case 'draw':
-        applyRemoteStroke(msg); break;
-      case 'sync-request':
-        sendFullSyncTo(fromId); break;
-      case 'sync':
-        if(msg.pixel) importDrawing(msg.pixel);
-        if(msg.omok) importOmok(msg.omok);
-        if(msg.meta && Array.isArray(msg.meta.names)) updateMembersFromList(msg.meta.names);
-        break;
-      case 'omok':
-        handleOmokNetwork(msg); break;
-      case 'system':
-        addSystem(msg.text||'', true); break;
-      default: break;
-    }
-  }
-
-  function updateMembersFromList(list){
-    if(Array.isArray(list) && list.length){
-      membersEl.textContent = '참가자: ' + Array.from(new Set(list)).join(', ');
-    }
-  }
-  function sendFullSyncTo(peerId){
-    const c = conns[peerId];
-    if(!c) return;
-    const payload = {
-      type:'sync',
-      pixel: exportDrawing(),
-      omok:  exportOmok(),
-      meta:  { names: getNamesList() }
-    };
-    safeSend(peerId, payload);
-  }
-
-  // --- 전송 UI ---
-  chatForm.addEventListener('submit', e=>{
-    e.preventDefault();
-    const txt = (chatInput.value||'').trim();
-    if(!txt) return;
-    if(txt.startsWith('/')){
-      handleLocalCmd(txt);
-      broadcast({ type:'cmd', text: txt, from: nickname });
-    } else {
-      addChat(nickname, txt, true);
-      broadcast({ type:'chat', name: nickname, text: txt });
-    }
-    chatInput.value = '';
+function startP2P(){ // 변경됨: 연결 루틴 정리
+  p2pt = new P2PT(TRACKERS, ROOM_TOPIC);
+  p2pt.on('peerconnect', peer=>{
+    conns[peer.id] = {peer, name:null};
+    roomInfo.textContent = `방: mainroom | ID: ${p2pt.peerId.slice(0,8)}`;
+    p2pt.send(peer,{type:'meta',name:nickname});
+    p2pt.send(peer,{type:'sync-request',from:p2pt.peerId});
+    updateMembers();
   });
-  btnHelp.addEventListener('click', ()=> { handleLocalCmd('/help'); broadcast({ type:'cmd', text:'/help', from:nickname }); });
-  btnClear.addEventListener('click', ()=> { chatLog.innerHTML=''; addSystem('채팅 지움', true); broadcast({ type:'cmd', text:'/clear', from:nickname }); });
-  btnOmok.addEventListener('click', ()=> { handleLocalCmd('/omok start'); broadcast({type:'cmd', text:'/omok start', from:nickname}); });
-
-  function handleLocalCmd(cmd){
-    if(cmd==='/help'){
-      addSystem('=== 명령어 ===', true);
-      for(const k in commands) addSystem(`${k} — ${commands[k]}`, true);
-    } else if(cmd==='/omok start'){ startOmok(true); }
-    else if(cmd==='/clear'){ chatLog.innerHTML=''; addSystem('채팅 지움', true); }
-    else addSystem('알 수 없는 명령어', true);
-  }
-  const commands = {'/help':'명령어 목록','/omok start':'오목 시작','/clear':'채팅 지우기'};
-
-  // --- 그림판 ---
-  const dCanvas = pixelCanvas;
-  const dctx = dCanvas.getContext('2d');
-  let dpr = window.devicePixelRatio || 1;
-  function resizeDrawingCanvas(){
-    const rect = dCanvas.getBoundingClientRect();
-    dCanvas.width = Math.max(320, Math.floor(rect.width * dpr));
-    dCanvas.height = Math.max(320, Math.floor(rect.height * dpr));
-    dCanvas.style.width = `${rect.width}px`;
-    dCanvas.style.height = `${rect.height}px`;
-    dctx.lineCap = 'round'; dctx.lineJoin='round';
-    redrawGrid();
-  }
-  function redrawGrid(){ /* grid는 별도 레이어로 유지 */ }
-
-  let currentMode = 'draw'; // 'draw' | 'eraser' | 'game'
-  let brushSize = parseInt(brushSizeInput.value || '2',10);
-  let drawing = false;
-  let lastPos = null;
-  let selectedColor = '#00ff00';
-
-  function getPos(evt){
-    const rect = dCanvas.getBoundingClientRect();
-    const x = Math.round((evt.clientX - rect.left) * dpr);
-    const y = Math.round((evt.clientY - rect.top) * dpr);
-    return {x,y};
-  }
-
-  // 변경됨: 지우개를 진짜 지우개로 (destination-out)
-  function applyStroke(fromX,fromY,toX,toY,color,width){
-    dctx.save();
-    if(color === '__erase__'){ // 변경됨
-      dctx.globalCompositeOperation = 'destination-out';
-      dctx.strokeStyle = 'rgba(0,0,0,1)';
-    } else {
-      dctx.globalCompositeOperation = 'source-over';
-      dctx.strokeStyle = color;
-    }
-    dctx.lineWidth = width;
-    dctx.beginPath();
-    dctx.moveTo(fromX,fromY);
-    dctx.lineTo(toX,toY);
-    dctx.stroke();
-    dctx.restore();
-  }
-  function applyRemoteStroke(pkt){
-    if(!pkt) return;
-    applyStroke(pkt.fromX,pkt.fromY,pkt.toX,pkt.toY,(typeof pkt.color!=='undefined'?pkt.color:'#00ff00'), pkt.width || (brushSize * dpr));
-  }
-
-  function broadcastStroke(fx,fy,tx,ty,color,w){
-    broadcast({ type:'draw', fromX:fx, fromY:fy, toX:tx, toY:ty, color, width: w });
-  }
-
-  dCanvas.addEventListener('pointerdown', e=>{
-    if(currentMode === 'game') return;
-    dCanvas.setPointerCapture(e.pointerId);
-    drawing = true;
-    lastPos = getPos(e);
+  p2pt.on('peerclose', peer=>{
+    delete conns[peer.id]; updateMembers();
   });
-  dCanvas.addEventListener('pointermove', e=>{
-    if(!drawing || currentMode === 'game') return;
-    const p = getPos(e);
-    const col = currentMode === 'eraser' ? '__erase__' : selectedColor; // 변경됨: 진짜 지우개
-    const w = Math.max(1, brushSize) * dpr;
-    applyStroke(lastPos.x, lastPos.y, p.x, p.y, col, w);
-    broadcastStroke(lastPos.x, lastPos.y, p.x, p.y, col, w);
-    lastPos = p;
+  p2pt.on('msg', (peer,msg)=> handleIncoming(peer.id,msg));
+  p2pt.on('warning', w=> addSystem('경고: '+w, true));
+  p2pt.start();
+  addSystem('P2P 시작됨', true);
+}
+
+function broadcast(payload){ try{ if(p2pt) p2pt.broadcast(payload); }catch(e){} }
+function sendTo(peerId, payload){ const c=conns[peerId]; if(c) try{ p2pt.send(c.peer,payload);}catch(e){} }
+
+function updateMembers(){
+  const names=[nickname, ...Object.values(conns).map(c=>c.name).filter(Boolean)];
+  membersEl.textContent = '참가자: ' + Array.from(new Set(names)).join(', ');
+}
+
+/* ======== 채팅 ======== */
+chatForm.addEventListener('submit', e=>{
+  e.preventDefault();
+  const txt=(chatInput.value||'').trim(); if(!txt) return;
+  if(txt.startsWith('/')){ handleLocalCmd(txt); broadcast({type:'cmd', text:txt, from:nickname}); }
+  else { addChat(nickname, txt, true); broadcast({type:'chat', name:nickname, text:txt}); }
+  chatInput.value='';
+});
+btnHelp.addEventListener('click', ()=>{ handleLocalCmd('/help'); broadcast({type:'cmd', text:'/help', from:nickname}); });
+btnClear.addEventListener('click', ()=>{ chatLog.innerHTML=''; addSystem('채팅 지움', true); broadcast({type:'cmd', text:'/clear', from:nickname}); });
+btnOmok.addEventListener('click', ()=>{ handleLocalCmd('/omok start'); broadcast({type:'cmd', text:'/omok start', from:nickname}); });
+
+function handleIncoming(fromId, msg){
+  if(!msg || !msg.type) return;
+  switch(msg.type){
+    case 'meta': if(conns[fromId]) conns[fromId].name = msg.name||fromId; updateMembers(); break;
+    case 'chat': addChat(msg.name||fromId, msg.text||''); break;
+    case 'cmd':
+      if(msg.text==='/help') showHelp();
+      if(msg.text==='/clear'){ chatLog.innerHTML=''; addSystem('채팅 초기화', true); }
+      if(msg.text==='/omok start') startOmok(false);
+      break;
+    case 'draw': applyRemoteStroke(msg); break;
+    case 'sync-request': sendFullSyncTo(fromId); break;
+    case 'sync':
+      if(msg.pixel) importDrawing(msg.pixel);
+      if(msg.omok)  importOmok(msg.omok);
+      if(msg.meta && Array.isArray(msg.meta.names)) membersEl.textContent='참가자: '+Array.from(new Set(msg.meta.names)).join(', ');
+      break;
+    case 'omok': handleOmokNetwork(msg); break;
+    default: break;
+  }
+}
+
+function showHelp(){
+  addSystem('=== 명령어 ===', true);
+  addSystem('/help — 명령어 목록', true);
+  addSystem('/omok start — 오목 시작', true);
+  addSystem('/clear — 채팅 지우기', true);
+}
+
+function sendFullSyncTo(peerId){
+  sendTo(peerId, {
+    type:'sync',
+    pixel: exportDrawing(),
+    omok:  exportOmok(),
+    meta:  { names: [nickname, ...Object.values(conns).map(c=>c.name).filter(Boolean)] }
   });
-  dCanvas.addEventListener('pointerup', e=>{ drawing=false; try{ dCanvas.releasePointerCapture(e.pointerId);}catch(e){} lastPos=null; });
-  dCanvas.addEventListener('pointercancel', ()=>{ drawing=false; lastPos=null; });
+}
 
-  brushSizeInput.addEventListener('input', ()=> { brushSize = Math.max(1, parseInt(brushSizeInput.value||'2')); });
-  modeDrawBtn.addEventListener('click', ()=> { currentMode='draw';  modeDrawBtn.disabled=true; modeEraserBtn.disabled=false; modeGameBtn.disabled=false; });
-  modeEraserBtn.addEventListener('click', ()=> { currentMode='eraser';modeDrawBtn.disabled=false; modeEraserBtn.disabled=true; modeGameBtn.disabled=false; });
-  modeGameBtn.addEventListener('click', ()=> { handleLocalCmd('/omok start'); broadcast({type:'cmd', text:'/omok start', from:nickname}); });
+/* ======== 단일 캔버스 — 그림/지우개/오목 ======== */
+let currentMode='draw'; // draw | eraser | game
+let brushSize = parseInt(brushSizeInput.value||'2',10);
+let selectedColor = '#00ff00';
 
-  // palette
-  function buildPalette(){
-    if(!paletteEl) return;
-    const colors=['#ffffff','#e74c3c','#f1c40f','#2ecc71','#3498db','#9b59b6','#e67e22','#a67c52',
-                  '#1abc9c','#2c3e50','#bdc3c7','#00ff00','#00ffff','#ff00ff','#ff66cc'];
-    paletteEl.innerHTML = '';
-    colors.forEach(c => {
-      const el = document.createElement('div'); el.className='sw'; el.style.background = c;
-      if(c===selectedColor) el.classList.add('sel');
-      el.addEventListener('click', ()=> { selectedColor = c; paletteEl.querySelectorAll('.sw').forEach(x=>x.classList.remove('sel')); el.classList.add('sel'); });
-      paletteEl.appendChild(el);
-    });
+const dpr = () => window.devicePixelRatio||1;
+function fitCanvas(){  // 변경됨: 반응형 리사이즈(가로/세로 자동)
+  const rect = canvas.getBoundingClientRect();
+  const r = dpr();
+  const W = Math.max(320, Math.floor(rect.width*r));
+  const H = Math.max(320, Math.floor(rect.height*r));
+  if(canvas.width!==W || canvas.height!==H){
+    const snapshot = exportDrawing(); // 크기변환 시 내용 보존
+    canvas.width=W; canvas.height=H;
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    importDrawing(snapshot);
+    if(OM.playing) drawOmok();
   }
+}
+window.addEventListener('resize', fitCanvas);
 
-  // export/import drawing
-  function exportDrawing(){ try{ return { img: dCanvas.toDataURL() }; }catch(e){ return null; } }
-  function importDrawing(obj){ if(!obj || !obj.img) return; const img=new Image(); img.onload=()=>{ dctx.clearRect(0,0,dCanvas.width,dCanvas.height); dctx.drawImage(img,0,0,dCanvas.width,dCanvas.height); }; img.src = obj.img; }
-
-  // --- 오목 ---
-  const OM = { n:15, board:[], playing:false, order:[], turnIndex:0 };
-  function omokReset(){ OM.board = Array.from({length:OM.n},()=>Array(OM.n).fill(0)); OM.playing=false; OM.order=[]; OM.turnIndex=0; currentMode='draw'; modeDrawBtn.disabled=true; modeEraserBtn.disabled=false; modeGameBtn.disabled=false; }
-  function drawOmok(){
-    const ctx = omokCanvas.getContext('2d'); const W = omokCanvas.width, H = omokCanvas.height;
-    ctx.clearRect(0,0,W,H); if(!OM.board.length) return;
-    const px = Math.floor(W/OM.n);
-    ctx.strokeStyle='#063'; ctx.lineWidth=1;
-    for(let i=0;i<=OM.n;i++){ ctx.beginPath(); ctx.moveTo(0.5+i*px,0.5); ctx.lineTo(0.5+i*px,0.5+px*OM.n); ctx.stroke();
-                               ctx.beginPath(); ctx.moveTo(0.5,0.5+i*px); ctx.lineTo(0.5+px*OM.n,0.5+i*px); ctx.stroke();}
-    for(let y=0;y<OM.n;y++) for(let x=0;x<OM.n;x++){
-      const v=OM.board[y][x]; if(!v) continue; ctx.beginPath();
-      ctx.fillStyle = v===1?'#0f0':'#f55';
-      ctx.arc((x+0.5)*px,(y+0.5)*px, Math.max(4, px*0.35), 0, Math.PI*2); ctx.fill();
-    }
-  }
-  function setOmokStatus(){ /* 상태 텍스트는 채팅으로 알림 */ }
-  function startOmok(localStart){
-    omokReset(); OM.playing=true;
-    // 이름 정렬로 순서 결정
-    const names = [nickname, ...Object.values(conns).map(c=>c.name).filter(Boolean)].sort();
-    OM.order = Array.from(new Set(names));
-    OM.turnIndex = 0; setOmokStatus(); drawOmok();
-    modeDrawBtn.disabled=false; modeEraserBtn.disabled=false; modeGameBtn.disabled=true;
-    if(localStart){ broadcast({ type:'omok', action:'start' }); }
-  }
-  omokCanvas.addEventListener('pointerdown', e=>{
-    if(!OM.playing) return;
-    const rect = omokCanvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio||1;
-    const x = Math.floor(((e.clientX-rect.left)*dpr) / (omokCanvas.width/OM.n));
-    const y = Math.floor(((e.clientY-rect.top )*dpr) / (omokCanvas.height/OM.n));
-    const me = nickname;
-    if(OM.order[OM.turnIndex]!==me) return;
-    placeStone(x,y, (OM.order.indexOf(me)%2?2:1));
+/* 팔레트 */
+function buildPalette(){
+  const colors=['#ffffff','#e74c3c','#f1c40f','#2ecc71','#3498db','#9b59b6','#e67e22','#a67c52',
+                '#1abc9c','#2c3e50','#bdc3c7','#00ff00','#00ffff','#ff00ff','#ff66cc','#000000'];
+  paletteEl.innerHTML='';
+  colors.forEach(c=>{
+    const el=document.createElement('div'); el.className='sw'; el.style.background=c;
+    if(c===selectedColor) el.classList.add('sel');
+    el.addEventListener('click', ()=>{ selectedColor=c; paletteEl.querySelectorAll('.sw').forEach(x=>x.classList.remove('sel')); el.classList.add('sel'); });
+    paletteEl.appendChild(el);
   });
-  function placeStone(x,y,stone){
-    if(x<0||y<0||x>=OM.n||y>=OM.n) return;
-    if(OM.board[y][x]) return;
-    const px = omokCanvas.width / OM.n;
-    OM.board[y][x] = stone; drawOmok();
-    broadcast({ type:'omok', action:'place', x, y, stone, by: nickname });
-    if(checkOmokWin(x,y,stone)){ OM.playing=false; addSystem(`${nickname} 님이 승리!`, true); broadcast({ type:'omok', action:'end', winner: nickname }); setTimeout(()=> omokReset(), 1200); return; }
-    OM.turnIndex = (OM.turnIndex + 1) % OM.order.length; setOmokStatus();
-  }
-  function handleOmokNetwork(msg){
-    if(msg.action === 'start'){ startOmok(false); }
-    else if(msg.action === 'place'){
-      if(!OM.playing) return;
-      if(OM.board[msg.y][msg.x]) return;
-      OM.board[msg.y][msg.x] = msg.stone; drawOmok();
-      const idx = OM.order.indexOf(msg.by); if(idx>=0) OM.turnIndex=(idx+1)%OM.order.length;
-    }
-    else if(msg.action === 'end'){ OM.playing=false; addSystem(`${msg.winner} 님이 승리했습니다!`, true); setTimeout(()=> omokReset(),1200); }
-    else if(msg.action === 'sync' && msg.omok) importOmok(msg.omok);
-  }
-  function importOmok(obj){ if(!obj) return; OM.board = obj.board||OM.board; OM.order = obj.order||OM.order; OM.playing = !!obj.playing; OM.turnIndex = obj.turnIndex||OM.turnIndex; drawOmok(); }
-  function exportOmok(){ return { board: OM.board, order: OM.order, playing: OM.playing, turnIndex: OM.turnIndex }; }
-  function checkOmokWin(x,y,stone){
-    const dirs=[[1,0],[0,1],[1,1],[1,-1]];
-    for(const [dx,dy] of dirs){
-      let cnt=1;
-      for(let s=1;s<5;s++){ const nx=x+dx*s, ny=y+dy*s; if(nx<0||ny<0||nx>=OM.n||ny>=OM.n) break; if(OM.board[ny][nx]===stone) cnt++; else break; }
-      for(let s=1;s<5;s++){ const nx=x-dx*s, ny=y-dy*s; if(nx<0||ny<0||nx>=OM.n||ny>=OM.n) break; if(OM.board[ny][nx]===stone) cnt++; else break; }
-      if(cnt>=5) return true;
-    }
-    return false;
-  }
+}
 
-  // 초기화
-  function resizeOmok(){
-    const rect = omokCanvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    omokCanvas.width  = Math.max(320, Math.floor(rect.width  * dpr));
-    omokCanvas.height = Math.max(320, Math.floor(rect.height * dpr));
+/* 드로잉 */
+let drawing=false, lastX=0, lastY=0;
+function localColor(){ return currentMode==='eraser' ? '__erase__' : selectedColor; } // 변경됨: 진짜 지우개
+function strokeLine(x1,y1,x2,y2,color,width){
+  ctx.save();
+  if(color==='__erase__'){ ctx.globalCompositeOperation='destination-out'; ctx.strokeStyle='rgba(0,0,0,1)'; }
+  else { ctx.globalCompositeOperation='source-over'; ctx.strokeStyle=color; }
+  ctx.lineWidth=width; ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); ctx.restore();
+}
+function applyRemoteStroke(pkt){ if(!pkt) return; strokeLine(pkt.x1,pkt.y1,pkt.x2,pkt.y2,pkt.col, pkt.w||brushSize*dpr()); }
+
+function getPos(e){
+  const rect=canvas.getBoundingClientRect(), r=dpr();
+  let x,y;
+  if(e.touches && e.touches[0]){ x=(e.touches[0].clientX-rect.left)*r; y=(e.touches[0].clientY-rect.top)*r; }
+  else { x=(e.clientX-rect.left)*r; y=(e.clientY-rect.top)*r; }
+  return {x:Math.round(x), y:Math.round(y)};
+}
+
+canvas.addEventListener('pointerdown', e=>{
+  if(currentMode==='game'){ handleOmokPointer(e); return; }
+  canvas.setPointerCapture(e.pointerId);
+  drawing=true; const p=getPos(e); lastX=p.x; lastY=p.y;
+});
+canvas.addEventListener('pointermove', e=>{
+  if(currentMode==='game' || !drawing) return;
+  const p=getPos(e), col=localColor(), w=Math.max(1,brushSize)*dpr();
+  strokeLine(lastX,lastY,p.x,p.y,col,w);
+  broadcast({type:'draw', x1:lastX,y1:lastY,x2:p.x,y2:p.y, col, w});
+  lastX=p.x; lastY=p.y;
+});
+canvas.addEventListener('pointerup', e=>{ drawing=false; try{canvas.releasePointerCapture(e.pointerId)}catch(_){} });
+canvas.addEventListener('pointercancel', ()=>{ drawing=false; });
+
+brushSizeInput.addEventListener('input', ()=>{ brushSize = Math.max(1, parseInt(brushSizeInput.value||'2',10)); });
+modeDrawBtn.addEventListener('click', ()=>{ currentMode='draw';  modeDrawBtn.disabled=true; modeEraserBtn.disabled=false; modeGameBtn.disabled=false; });
+modeEraserBtn.addEventListener('click', ()=>{ currentMode='eraser';modeDrawBtn.disabled=false; modeEraserBtn.disabled=true; modeGameBtn.disabled=false; });
+modeGameBtn.addEventListener('click', ()=>{ handleLocalCmd('/omok start'); broadcast({type:'cmd', text:'/omok start', from:nickname}); });
+
+/* 저장·복구 */
+function exportDrawing(){ try{ return {img: canvas.toDataURL()}; }catch(e){ return null; } }
+function importDrawing(obj){ if(!obj||!obj.img) return; const img=new Image(); img.onload=()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0,canvas.width,canvas.height); }; img.src=obj.img; }
+
+/* ======== 오목 (단일 캔버스) ======== */
+const OM={ n:15, board:[], playing:false, order:[], turnIndex:0 };
+function omokReset(){ OM.board=Array.from({length:OM.n},()=>Array(OM.n).fill(0)); OM.playing=false; OM.order=[]; OM.turnIndex=0; }
+function startOmok(localStart){
+  currentMode='game'; modeDrawBtn.disabled=false; modeEraserBtn.disabled=false; modeGameBtn.disabled=true;
+  omokReset(); OM.playing=true;
+  const names=[nickname, ...Object.values(conns).map(c=>c.name).filter(Boolean)].sort();
+  OM.order=Array.from(new Set(names)); OM.turnIndex=0; drawOmok();
+  if(localStart) broadcast({type:'omok', action:'start'});
+}
+function handleOmokPointer(e){
+  if(!OM.playing) return;
+  const rect=canvas.getBoundingClientRect(), r=dpr();
+  const cell = Math.floor((Math.min(rect.width,rect.height)*r)/OM.n);
+  const px = cell;
+  const p=getPos(e);
+  const x=Math.floor(p.x/px), y=Math.floor(p.y/px);
+  const me=nickname; if(OM.order[OM.turnIndex]!==me) return;
+  placeStone(x,y,(OM.order.indexOf(me)%2?2:1));
+}
+function placeStone(x,y,stone){
+  if(x<0||y<0||x>=OM.n||y>=OM.n) return;
+  if(OM.board[y][x]) return;
+  OM.board[y][x]=stone; drawOmok();
+  broadcast({type:'omok', action:'place', x,y,stone, by:nickname});
+  if(checkWin(x,y,stone)){ OM.playing=false; addSystem(`${nickname} 승리!`, true); broadcast({type:'omok', action:'end', winner:nickname}); return; }
+  OM.turnIndex=(OM.turnIndex+1)%OM.order.length;
+}
+function handleOmokNetwork(msg){
+  if(msg.action==='start'){ startOmok(false); }
+  else if(msg.action==='place'){ if(!OM.playing) return; if(OM.board[msg.y][msg.x]) return; OM.board[msg.y][msg.x]=msg.stone; drawOmok(); }
+  else if(msg.action==='end'){ OM.playing=false; addSystem(`${msg.winner} 님 승리`, true); }
+}
+function drawOmok(){
+  // 바탕 지우고 격자 그리기
+  ctx.save(); ctx.globalCompositeOperation='source-over';
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  const px = Math.floor(Math.min(canvas.width,canvas.height)/OM.n);
+  ctx.strokeStyle='#063'; ctx.lineWidth=1;
+  for(let i=0;i<=OM.n;i++){
+    ctx.beginPath(); ctx.moveTo(.5+i*px,.5); ctx.lineTo(.5+i*px,.5+px*OM.n); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(.5,.5+i*px); ctx.lineTo(.5+px*OM.n,.5+i*px); ctx.stroke();
   }
-  function initSizes(){ resizeDrawingCanvas(); resizeOmok(); drawOmok(); }
-  buildPalette(); initSizes(); window.addEventListener('resize', ()=>{ resizeDrawingCanvas(); resizeOmok(); drawOmok(); });
-  startPeer();
+  for(let y=0;y<OM.n;y++) for(let x=0;x<OM.n;x++){
+    const v=OM.board[y][x]; if(!v) continue;
+    ctx.beginPath(); ctx.fillStyle = v===1?'#0f0':'#f55';
+    ctx.arc((x+.5)*px,(y+.5)*px,Math.max(4,px*.35),0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+function checkWin(x,y,stone){
+  const dirs=[[1,0],[0,1],[1,1],[1,-1]];
+  for(const [dx,dy] of dirs){
+    let c=1;
+    for(let s=1;s<5;s++){ const nx=x+dx*s,ny=y+dy*s; if(nx<0||ny<0||nx>=OM.n||ny>=OM.n) break; if(OM.board[ny][nx]===stone) c++; else break; }
+    for(let s=1;s<5;s++){ const nx=x-dx*s,ny=y-dy*s; if(nx<0||ny<0||nx>=OM.n||ny>=OM.n) break; if(OM.board[ny][nx]===stone) c++; else break; }
+    if(c>=5) return true;
+  } return false;
+}
+function importOmok(obj){ if(!obj) return; OM.board=obj.board||OM.board; OM.order=obj.order||OM.order; OM.playing=!!obj.playing; OM.turnIndex=obj.turnIndex||0; drawOmok(); }
+function exportOmok(){ return {board:OM.board, order:OM.order, playing:OM.playing, turnIndex:OM.turnIndex}; }
+
+/* ======== 초기화 ======== */
+buildPalette();
+fitCanvas();
+startP2P();
 </script>
 </body>
 </html>
