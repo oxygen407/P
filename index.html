@@ -28,7 +28,7 @@ body{margin:0;background:#000;color:var(--txt);font-family:ui-monospace,SFMono-R
 .right .toolbar{display:flex;gap:8px;padding:8px;border-bottom:2px solid #060;align-items:center;flex-wrap:wrap}
 .right .canvasWrap{position:relative;flex:1;display:flex;flex-direction:column;padding:8px;gap:8px}
 #pixelCanvas{width:100%;height:100%;background:#000;border:2px solid #0f0;touch-action:none}
-.grid{position:absolute;top:8px;left:8px;right:8px;bottom:60px; /* 변경됨: 팔레트 침범 방지 */ 
+.grid{position:absolute;top:8px;left:8px;right:8px;bottom:60px;
   background:linear-gradient(#003a00 1px,transparent 1px) 0 0/20px 20px,
              linear-gradient(90deg,#003a00 1px,transparent 1px) 0 0/20px 20px}
 .palette{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:6px}
@@ -63,7 +63,7 @@ button:disabled{opacity:.6}
       </form>
       <div class="controls">
         <button id="btnHelp">/help</button>
-        <button id="btnClear">채팅 지우기</button> <!-- 변경됨: 오목 버튼 삭제 -->
+        <button id="btnClear">채팅 지우기</button>
       </div>
       <div class="members" id="members">참가자: -</div>
     </div>
@@ -85,9 +85,12 @@ button:disabled{opacity:.6}
   <div class="footer">시그널링: WebTorrent Trackers (HTTPS/WSS); 모든 데이터는 브라우저 간 전송됩니다.</div>
 </div>
 
+<!-- 원본: p2pt -->
 <script src="https://unpkg.com/p2pt@latest/dist/p2pt.umd.min.js"></script>
 <script>
+/* ======== DOM ======== */
 const userNameInput = document.getElementById('userName');
+const roomIdInput   = document.getElementById('roomId'); // 변경됨: URL 방 ID 반영
 const chatLog       = document.getElementById('chatLog');
 const chatForm      = document.getElementById('chatForm');
 const chatInput     = document.getElementById('chatInput');
@@ -103,6 +106,7 @@ const canvas        = document.getElementById('pixelCanvas');
 const ctx           = canvas.getContext('2d');
 const paletteEl     = document.getElementById('palette');
 
+/* ======== 유틸 ======== */
 function escapeHtml(s=''){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 const now = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
 function addSystem(text, local=false){
@@ -116,6 +120,13 @@ function addChat(name, text, local=false){
   if(local) d.style.color='#8f8'; chatLog.appendChild(d); chatLog.scrollTop=chatLog.scrollHeight;
 }
 
+/* ======== 방 링크 (URL) ======== */
+const params = new URLSearchParams(location.search);                            // 변경됨: 방을 URL로 지정
+const roomFromUrl = (params.get('room')||'mainroom').trim();
+roomIdInput.value = roomFromUrl;                                               // 변경됨
+const ROOM_TOPIC = 'p2pchat-' + roomFromUrl;                                   // 변경됨
+
+/* ======== P2P 설정 ======== */
 const TRACKERS = [
   'wss://tracker.openwebtorrent.com',
   'wss://tracker.btorrent.xyz',
@@ -123,7 +134,16 @@ const TRACKERS = [
   'wss://tracker.webtorrent.dev',
   'wss://tracker.files.fm:7073/announce'
 ];
-const ROOM_TOPIC = 'p2pchat-mainroom';
+
+const ICE_CONFIG = {                                                           // 변경됨: STUN/TURN 추가
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "turn:openrelay.metered.ca:80",  username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
+  ]
+};
 
 let nickname = (userNameInput.value||'').trim()||'Guest';
 userNameInput.addEventListener('change', ()=>{ nickname=(userNameInput.value||'').trim()||'Guest'; updateMembers(); });
@@ -132,38 +152,51 @@ const conns = {};
 let p2pt=null;
 
 function startP2P(){
-  p2pt = new P2PT(TRACKERS, ROOM_TOPIC);
+  p2pt = new P2PT(TRACKERS, ROOM_TOPIC, { rtcConfig: ICE_CONFIG });            // 변경됨: rtcConfig 전달
   p2pt.on('peerconnect', peer=>{
     conns[peer.id] = {peer, name:null};
-    roomInfo.textContent = `방: mainroom | ID: ${p2pt.peerId.slice(0,8)}`;
-    p2pt.send(peer,{type:'meta',name:nickname});
+    roomInfo.textContent = `방: ${roomFromUrl} | ID: ${p2pt.peerId.slice(0,8)}`; // 변경됨
+    safeSend(peer, {type:'meta',name:nickname});                                // 변경됨: 안전 직렬화
     updateMembers();
+    // 처음 연결된 상대에게 현재 상태 동기화(옵션) — 필요시 주석 해제
+    // safeSend(peer, {type:'sync', pixel: exportDrawing(), meta:{names: currentNames()}});
   });
   p2pt.on('peerclose', peer=>{
     delete conns[peer.id]; updateMembers();
   });
-  p2pt.on('msg', (peer,msg)=> handleIncoming(peer.id,msg)); // 변경됨: 채팅 동기화 정상 처리
+  p2pt.on('msg', (peer, data)=>{                                               // 변경됨: 수신 직렬화 처리
+    let msg = data;
+    try { if (typeof data === 'string') msg = JSON.parse(data); } catch(e){ return; }
+    handleIncoming(peer.id, msg);
+  });
+  p2pt.on('warning', w=> addSystem('경고: '+w, true));                          // (진단용)
   p2pt.start();
   addSystem('P2P 시작됨', true);
 }
 
-function broadcast(payload){ if(p2pt) p2pt.broadcast(payload); }
-function sendTo(peerId, payload){ const c=conns[peerId]; if(c) p2pt.send(c.peer,payload); }
+function safeBroadcast(payload){                                                // 변경됨: JSON 직렬화 통일
+  try{ if(p2pt) p2pt.broadcast(JSON.stringify(payload)); }catch(e){}
+}
+function safeSend(peer, payload){
+  try{ p2pt.send(peer, JSON.stringify(payload)); }catch(e){}
+}
+function sendTo(peerId, payload){ const c=conns[peerId]; if(c) safeSend(c.peer, payload); }
 
+function currentNames(){ return [nickname, ...Object.values(conns).map(c=>c.name).filter(Boolean)]; }
 function updateMembers(){
-  const names=[nickname, ...Object.values(conns).map(c=>c.name).filter(Boolean)];
-  membersEl.textContent = '참가자: ' + Array.from(new Set(names)).join(', ');
+  membersEl.textContent = '참가자: ' + Array.from(new Set(currentNames())).join(', ');
 }
 
+/* ======== 채팅 ======== */
 chatForm.addEventListener('submit', e=>{
   e.preventDefault();
   const txt=(chatInput.value||'').trim(); if(!txt) return;
-  if(txt.startsWith('/')){ handleLocalCmd(txt); broadcast({type:'cmd', text:txt, from:nickname}); }
-  else { addChat(nickname, txt, true); broadcast({type:'chat', name:nickname, text:txt}); }
+  if(txt.startsWith('/')){ handleLocalCmd(txt); safeBroadcast({type:'cmd', text:txt, from:nickname}); } // 변경됨
+  else { addChat(nickname, txt, true); safeBroadcast({type:'chat', name:nickname, text:txt}); }         // 변경됨
   chatInput.value='';
 });
-btnHelp.addEventListener('click', ()=>{ showHelp(); broadcast({type:'cmd', text:'/help', from:nickname}); });
-btnClear.addEventListener('click', ()=>{ chatLog.innerHTML=''; addSystem('채팅 지움', true); broadcast({type:'cmd', text:'/clear', from:nickname}); });
+btnHelp.addEventListener('click', ()=>{ showHelp(); safeBroadcast({type:'cmd', text:'/help', from:nickname}); }); // 변경됨
+btnClear.addEventListener('click', ()=>{ chatLog.innerHTML=''; addSystem('채팅 지움', true); safeBroadcast({type:'cmd', text:'/clear', from:nickname}); }); // 변경됨
 
 function handleIncoming(fromId, msg){
   if(!msg || !msg.type) return;
@@ -182,6 +215,7 @@ function showHelp(){
   addSystem('/clear — 채팅 지우기', true);
 }
 
+/* ======== 그림판 ======== */
 let currentMode='draw';
 let brushSize = parseInt(brushSizeInput.value||'2',10);
 let selectedColor = '#00ff00';
@@ -239,7 +273,7 @@ canvas.addEventListener('pointermove', e=>{
   if(!drawing) return;
   const p=getPos(e), col=localColor(), w=Math.max(1,brushSize)*dpr();
   strokeLine(lastX,lastY,p.x,p.y,col,w);
-  broadcast({type:'draw', x1:lastX,y1:lastY,x2:p.x,y2:p.y, col, w});
+  safeBroadcast({type:'draw', x1:lastX,y1:lastY,x2:p.x,y2:p.y, col, w});       // 변경됨: 안전 브로드캐스트
   lastX=p.x; lastY=p.y;
 });
 canvas.addEventListener('pointerup', e=>{ drawing=false; try{canvas.releasePointerCapture(e.pointerId)}catch(_){} });
@@ -249,12 +283,12 @@ brushSizeInput.addEventListener('input', ()=>{ brushSize = Math.max(1, parseInt(
 modeDrawBtn.addEventListener('click', ()=>{ currentMode='draw';  modeDrawBtn.disabled=true; modeEraserBtn.disabled=false; });
 modeEraserBtn.addEventListener('click', ()=>{ currentMode='eraser';modeDrawBtn.disabled=false; modeEraserBtn.disabled=true; });
 
-function exportDrawing(){ return {img: canvas.toDataURL()}; }
+function exportDrawing(){ try{ return {img: canvas.toDataURL()}; }catch(e){ return null; } }
 function importDrawing(obj){ if(!obj||!obj.img) return; const img=new Image(); img.onload=()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0,canvas.width,canvas.height); }; img.src=obj.img; }
 
 buildPalette();
 fitCanvas();
-startP2P();
+startP2P();                                                                     // 변경됨: 링크방 + STUN/TURN 구성으로 시작
 </script>
 </body>
 </html>
